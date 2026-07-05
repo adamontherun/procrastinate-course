@@ -1,0 +1,24 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    # PGPORT makes Postgres listen on 5441 *inside* the container too, not just
+    # on the host mapping. The devcontainer shares this container's network
+    # namespace, so "localhost:5441" has to work from both the host and inside
+    # the container for every example to run unmodified in Codespaces.
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: procrastinate_course
+      PGPORT: "5441"
+    ports:
+      - "5441:5441"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d procrastinate_course -p 5441"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
