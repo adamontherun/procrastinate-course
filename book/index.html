@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Procrastinate: Task Queues on Postgres — a hands-on course</title>
+<meta name="description" content="A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Procrastinate: Task Queues on Postgres — a hands-on course">
+<meta property="og:description" content="A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.">
+<meta property="og:url" content="{{PAGES_URL}}">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Procrastinate: Task Queues on Postgres — a hands-on course">
+<meta name="twitter:description" content="A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Course",
+  "name": "Procrastinate: Task Queues on Postgres",
+  "description": "A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.",
+  "url": "{{PAGES_URL}}",
+  "image": "{{OG_IMAGE_URL}}",
+  "provider": {"@type": "Person", "name": "Adam Smith", "url": "{{AUTHOR_URL}}"},
+  "isAccessibleForFree": true,
+  "inLanguage": "en",
+  "hasPart": [
+    {"@type": "Chapter", "position": 1, "name": "{{CHAPTER_TITLE}}", "description": "{{ONE_LINE_CHAPTER_HOOK}}", "url": "{{PAGES_URL}}chapters/ch{{CH_NUM_PADDED}}.html"}
+  ]
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="chapters/ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="chapters/ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="chapters/ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="chapters/ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="chapters/ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="chapters/ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="chapters/ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="chapters/ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="chapters/ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="chapters/ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="chapters/ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="chapters/ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="chapters/ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article class="cover">
+      <p class="kicker">A hands-on course</p>
+      <h1>Procrastinate: <em style="color:var(--brand);font-style:normal">Task Queues on Postgres</em></h1>
+      <p class="lede">
+        Procrastinate is a Python task queue with an unusual opinion: the message
+        broker you already run is called PostgreSQL. This course takes you from
+        "what is a background job?" to operating workers in production — retries,
+        locks, scheduling, graceful shutdown, and a real deployment on AWS ECS.
+        Every example in the book was run against a real Postgres database, every
+        claim about a default or a gotcha links back to the official docs, and
+        every chapter ends with a challenge you solve by making failing tests pass.
+      </p>
+      <p>
+        Click <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener"><strong>Launch Codespace</strong></a>
+        in the sidebar for a ready-to-go environment, or clone the
+        <a href="{{REPO_URL}}" target="_blank" rel="noopener">repo</a> and run
+        <code>uv sync &amp;&amp; docker compose up -d</code> locally.
+      </p>
+
+      <div class="toc-parts">
+        <section class="toc-part">
+          <h2>Part I · Foundations</h2>
+          <ol>
+            <li><a href="chapters/ch01.html"><span class="ch-num">1</span><span><span class="ch-title">Why a task queue — and why Postgres</span><span class="ch-desc">What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY.</span></span></a></li>
+            <li><a href="chapters/ch02.html"><span class="ch-num">2</span><span><span class="ch-title">Setup: your first job, end to end</span><span class="ch-desc">Install, connect, apply the schema, defer one job, and watch a worker pick it up.</span></span></a></li>
+            <li><a href="chapters/ch03.html"><span class="ch-num">3</span><span><span class="ch-title">Defining and deferring tasks</span><span class="ch-desc">Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases.</span></span></a></li>
+            <li><a href="chapters/ch04.html"><span class="ch-num">4</span><span><span class="ch-title">Workers up close</span><span class="ch-desc">Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up.</span></span></a></li>
+          </ol>
+        </section>
+        <section class="toc-part">
+          <h2>Part II · Controlling execution</h2>
+          <ol>
+            <li><a href="chapters/ch05.html"><span class="ch-num">5</span><span><span class="ch-title">Retries and failure</span><span class="ch-desc">The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry.</span></span></a></li>
+            <li><a href="chapters/ch06.html"><span class="ch-num">6</span><span><span class="ch-title">Scheduling: later and every hour</span><span class="ch-desc">One-off future jobs with schedule_at/schedule_in, and periodic tasks with cron — including who defers them when you run five workers.</span></span></a></li>
+            <li><a href="chapters/ch07.html"><span class="ch-num">7</span><span><span class="ch-title">Locks, queueing locks, priorities</span><span class="ch-desc">Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first.</span></span></a></li>
+            <li><a href="chapters/ch08.html"><span class="ch-num">8</span><span><span class="ch-title">Context, cancellation, middleware</span><span class="ch-desc">Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware.</span></span></a></li>
+          </ol>
+        </section>
+        <section class="toc-part">
+          <h2>Part III · Sync and the web</h2>
+          <ol>
+            <li><a href="chapters/ch09.html"><span class="ch-num">9</span><span><span class="ch-title">Sync and async together</span><span class="ch-desc">Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary.</span></span></a></li>
+            <li><a href="chapters/ch10.html"><span class="ch-num">10</span><span><span class="ch-title">Procrastinate in FastAPI</span><span class="ch-desc">Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process.</span></span></a></li>
+          </ol>
+        </section>
+        <section class="toc-part">
+          <h2>Part IV · Production</h2>
+          <ol>
+            <li><a href="chapters/ch11.html"><span class="ch-num">11</span><span><span class="ch-title">Testing your tasks</span><span class="ch-desc">InMemoryConnector, asserting on deferred jobs, and running a real worker inside a test when it's worth it.</span></span></a></li>
+            <li><a href="chapters/ch12.html"><span class="ch-num">12</span><span><span class="ch-title">Operating in production</span><span class="ch-desc">Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small.</span></span></a></li>
+            <li><a href="chapters/ch13.html"><span class="ch-num">13</span><span><span class="ch-title">Deploying workers on AWS ECS</span><span class="ch-desc">Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys.</span></span></a></li>
+          </ol>
+        </section>
+      </div>
+    </article>
+  </main>
+</div>
+<script src="assets/vendor/highlight.min.js"></script>
+<script src="assets/book.js"></script>
+</body>
+</html>
