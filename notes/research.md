@@ -90,9 +90,16 @@ signatures rather than trusting prose.
   - Default: one job at a time; `concurrency=30` → async sub-workers; free CPU
     during awaited I/O.
 - Connections: https://procrastinate.readthedocs.io/en/stable/howto/production/connections.html
-  - Pool max_size default 10 (per psycopg_pool); LISTEN/NOTIFY costs one dedicated
-    connection; `listen_notify=False` (or `--no-listen-notify`) to disable;
-    `worker_defaults={"listen_notify": False}`.
+  - LISTEN/NOTIFY costs one dedicated connection; `listen_notify=False` (or
+    `--no-listen-notify`) to disable; `worker_defaults={"listen_notify": False}`.
+  - CORRECTION (fact-check, verified against installed psycopg_pool): the docs'
+    "up to 10 parallel connections" figure is about AiopgConnector. For
+    PsycopgConnector the pool default is psycopg_pool's min_size=4 /
+    max_size=None (=> 4), and procrastinate doesn't override it.
+  - CORRECTION (fact-check): procrastinate_workers table has only id +
+    last_heartbeat columns; the worker name is NOT stored in the DB.
+  - CORRECTION (fact-check): /en/stable/api.html is a 404; the API reference
+    lives at /en/stable/reference.html.
 
 ## Ch 5 — Retries
 
@@ -247,5 +254,18 @@ signatures rather than trusting prose.
   `procrastinate.middleware` module exported).
 - `RetryStrategy(*, max_attempts=None, wait=0, linear_wait=0, exponential_wait=0,
   retry_exceptions=None)`.
+- **max_attempts semantics (verified empirically + in retry.py source):**
+  despite the name, it's the max number of RETRIES — the guard is
+  `job.attempts >= max_attempts` where attempts counts *prior* attempts, so
+  `max_attempts=3` allows 4 total executions. Docstring: "The maximum number
+  of attempts the job should be retried". Consistent with the howto's
+  "retry=5 → 6 times total". A course gotcha callout covers this.
+- Locks + polling (verified empirically, ch07 example): releasing a lock does
+  NOT notify waiting workers; the next locked job waits for the next poll.
+  Same-lock handoff latency ≈ fetch_job_polling_interval (measured 5.6s at
+  default, 1.2s at 0.2s polling, for two 0.5s jobs).
+- wait=False + locks (verified empirically): a run_worker(wait=False) worker
+  can exit while a lock-blocked job is still `todo` — "queue empty" means
+  "nothing fetchable right now".
 - `Task.defer_async(...) -> int` (job id). Verified live: hello_world returned 1.
 - `App(*, connector, import_paths=None, worker_defaults=None, periodic_defaults=None)`.

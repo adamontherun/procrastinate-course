@@ -227,8 +227,9 @@ INFO:procrastinate.worker.worker:Stopped worker on all queues</code></pre>
         <span class="callout-title">🏭 In production</span>
         <p>
           The LISTEN/NOTIFY connection is a real, dedicated database connection
-          per worker, on top of the pool (10 connections by default, the
-          <code>psycopg_pool</code> default). On a big fleet, or behind a
+          per worker, on top of the pool (4 connections by default — the
+          <code>psycopg_pool</code> default of <code>min_size=4</code>, which
+          procrastinate's connector doesn't override). On a big fleet, or behind a
           connection pooler that doesn't support LISTEN, you can trade latency
           for connections:
           <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/connections.html" target="_blank" rel="noopener"><code>listen_notify=False</code></a>
@@ -240,11 +241,12 @@ INFO:procrastinate.worker.worker:Stopped worker on all queues</code></pre>
       <h2>Worker options you'll actually set</h2>
       <p>
         The full option list lives on
-        <a href="https://procrastinate.readthedocs.io/en/stable/api.html" target="_blank" rel="noopener">App.run_worker's API page</a>;
+        <a href="https://procrastinate.readthedocs.io/en/stable/reference.html#procrastinate.App.run_worker" target="_blank" rel="noopener">App.run_worker's API reference</a>;
         beyond <code>queues</code>, <code>concurrency</code>, and
         <code>wait</code>, two more come up repeatedly in this course.
-        <code>name=</code> labels the worker in logs and in its database
-        registration, which matters as soon as you run more than one.
+        <code>name=</code> labels the worker in its log lines, which matters as
+        soon as you run more than one. (The database registration row itself
+        carries only an id and a heartbeat, not the name.)
         <code>install_signal_handlers=False</code> tells the worker not to claim
         SIGINT/SIGTERM for itself, so it can live inside a larger application
         that has its own shutdown story; that's chapter 10's FastAPI embedding.
