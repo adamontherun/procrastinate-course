@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 2 · Setup: your first job, end to end — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Install procrastinate, connect an App, apply the schema, defer one job, and watch a worker pick it up. Chapter 2 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch02.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 2 · Setup: your first job, end to end — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Install procrastinate, connect an App, apply the schema, defer one job, and watch a worker pick it up. Chapter 2 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch02.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 2 · Setup: your first job, end to end — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Install procrastinate, connect an App, apply the schema, defer one job, and watch a worker pick it up. Chapter 2 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 2,
+  "name": "Setup: your first job, end to end",
+  "description": "Install procrastinate, connect an App, apply the schema, defer one job, and watch a worker pick it up.",
+  "url": "{{PAGES_URL}}chapters/ch02.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch01.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch03.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html" class="current"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 2 · Part I — Foundations</p>
+      <h1>Setup: your first job, end to end</h1>
+      <p class="lede">
+        This chapter assembles the four pieces every Procrastinate project has: a
+        connector that knows how to reach Postgres, an <code>App</code> that ties
+        tasks to that connector, a one-time schema applied to the database, and
+        the worker loop. By the end you'll have run the whole cycle and know
+        where two of the most common setup traps hide.
+      </p>
+
+      <h2>Install and connect</h2>
+      <p>
+        Procrastinate installs with <code>pip install procrastinate</code> (this
+        course's repo uses <code>uv sync</code>, which reads the same dependency
+        from <code>pyproject.toml</code>). It requires Python 3.10+ and
+        PostgreSQL 13+, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/" target="_blank" rel="noopener">project's own description</a>.
+        The psycopg driver comes along as a dependency. The course repo also
+        ships a <code>compose.yaml</code> that starts Postgres 17 on port 5441,
+        so the examples never collide with a Postgres you already run.
+      </p>
+      <p>
+        The <code>App</code> is Procrastinate's entry point: it holds the task
+        registry and the connection. You hand it a <strong>connector</strong>,
+        the object that owns the actual database pool. There are
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/connector.html" target="_blank" rel="noopener">five connector classes</a>;
+        the two that matter for now are <code>PsycopgConnector</code> (async,
+        built on psycopg 3) and its synchronous twin
+        <code>SyncPsycopgConnector</code>. Workers require the async one, which
+        is why it's the default choice for this whole course; chapter 9 covers
+        when the sync classes earn their keep.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/hello_world.py</figcaption>
+        <pre><code class="language-python">import asyncio
+
+import procrastinate
+
+app = procrastinate.App(
+    connector=procrastinate.PsycopgConnector(
+        conninfo="postgresql://postgres:password@localhost:5441/procrastinate_course",
+    ),
+)
+
+
+@app.task
+async def greet(name: str) -> None:
+    print(f"Hello, {name}!")
+
+
+async def main() -> None:
+    async with app.open_async():
+        job_id = await greet.defer_async(name="world")
+        print(f"Deferred job {job_id}")
+        await app.run_worker_async(wait=False)
+
+        # Prove the round trip: read the job's final status back out.
+        status = await app.job_manager.get_job_status_async(job_id)
+        print(f"Job {job_id} finished with status: {status.value}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())</code></pre>
+      </figure>
+
+      <p>
+        Three details in that file do more work than they look like they're doing.
+        The connector accepts a <code>conninfo</code> DSN string, but it could
+        equally take keyword arguments (<code>kwargs={"host": ..., "user": ...}</code>)
+        or nothing at all, in which case psycopg falls back to the standard
+        <code>PGHOST</code>/<code>PGUSER</code>-style
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/connector.html" target="_blank" rel="noopener">libpq environment variables</a>,
+        the form you'll want in containers. <code>app.open_async()</code> opens
+        the connection pool, and the <code>async with</code> form
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/open_connection.html" target="_blank" rel="noopener">closes it automatically</a>
+        on the way out. And <code>run_worker_async(wait=False)</code> runs a real
+        worker that exits once the queue is empty instead of waiting forever.
+        That's handy in scripts and, as chapter 11 shows, in tests.
+      </p>
+
+      <h2>The schema, once per database</h2>
+      <p>
+        Before any of that runs, the database needs Procrastinate's tables and
+        functions. That's a one-time command, using the CLI that ships with the
+        package:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">terminal</figcaption>
+        <pre><code class="language-text">$ export PYTHONPATH=.
+$ uv run procrastinate --app=examples.hello_world.app schema --apply
+Applying schema
+Done
+
+$ uv run procrastinate --app=examples.hello_world.app healthchecks
+App configuration: OK
+DB connection: OK
+Found procrastinate_jobs table: OK</code></pre>
+      </figure>
+
+      <p>
+        The <code>--app</code> flag takes a dotted path to your <code>App</code>
+        instance, and <code>healthchecks</code> is the quickest way to confirm
+        everything is wired: configuration, connection, schema. If you'd rather
+        not repeat the flag, the CLI also reads a
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/command_line.html" target="_blank" rel="noopener"><code>PROCRASTINATE_APP</code> environment variable</a>.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          <code>procrastinate: error: Could not load app from examples.hello_world.app</code>
+          — if you see this, the CLI simply can't import your module, because
+          unlike <code>python -m</code>, a console script doesn't put the current
+          directory on <code>sys.path</code>. The fix is the
+          <code>export PYTHONPATH=.</code> above, which the
+          <a href="https://procrastinate.readthedocs.io/en/stable/quickstart.html" target="_blank" rel="noopener">official quickstart</a>
+          itself calls out. We hit it building this course, on the first CLI
+          command we ran.
+        </p>
+      </aside>
+
+      <p>Now the round trip:</p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">$ uv run python -m examples.hello_world
+App is instantiated in the main Python module (...). See https://procrastinate.readthedocs.io/en/stable/discussions.html#top-level-app
+Deferred job 1
+Hello, world!
+Job 1 finished with status: succeeded</code></pre>
+      </figure>
+
+      <p>
+        One deferred job, executed by a worker in the same process, with its
+        final status read back from the database. That's the entire loop the
+        next eleven chapters elaborate on. But notice the warning on the first
+        line; it's worth taking seriously.
+      </p>
+
+      <h2>Where the app object should live</h2>
+      <p>
+        Procrastinate warns because our <code>App</code> was created in the module
+        Python ran directly (<code>__main__</code>). For a demo script that's
+        harmless. In a real project it sets up a genuinely nasty failure, described
+        in the
+        <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html#top-level-app" target="_blank" rel="noopener">docs' top-level-app discussion</a>:
+        if the module defining your app is run as <code>__main__</code>
+        <em>and</em> your tasks live in another module that imports it, Python
+        imports the app's module a second time under its real name, and "you will
+        end up with two distinct instances of your app": one holding your task
+        registry, one actually connected, neither complete.
+      </p>
+      <p>
+        You can see the seed of the problem in this chapter's own artifacts.
+        The worker log in chapter 1 and the shell output below both record task
+        names like <code>__main__.greet</code>: a task's default name is derived
+        from the module it was defined in, and our module was <code>__main__</code>.
+        A separate worker process importing the same file would know that task as
+        <code>examples.hello_world.greet</code> instead, and jobs deferred under
+        one name aren't found under the other. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/app.html" target="_blank" rel="noopener">recommended layout</a>
+        is a dedicated module for the app (say <code>myproject/procrastinate_app.py</code>),
+        with <code>import_paths=["myproject.tasks"]</code> pointing at the modules
+        that define tasks. The course examples keep app creation inside
+        <code>examples/common.py</code> for the same reason.
+      </p>
+
+      <h2>Poking at the queue</h2>
+      <p>
+        The CLI ships a small admin shell. After the runs above, ask it what the
+        database remembers:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">terminal</figcaption>
+        <pre><code class="language-text">$ uv run procrastinate --app=examples.hello_world.app shell list_jobs
+#1 __main__.greet on default - [succeeded]
+#2 __main__.send_confirmation on default - [succeeded]
+#3 __main__.flaky_export on default - [failed]</code></pre>
+      </figure>
+
+      <p>
+        Chapter 1's jobs are still there, failure included. Nothing is consumed
+        by being read; rows persist until something deletes them (chapter 12
+        covers keeping this table from growing forever).
+      </p>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run the full sequence from a clean database: <code>docker compose up -d</code>,
+          the <code>schema --apply</code> command, then
+          <code>uv run python -m examples.hello_world</code>. Then break it on
+          purpose: stop Postgres with <code>docker compose stop</code> and run
+          <code>healthchecks</code> to see what failure looks like.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch02/challenge.py</code>, has you build
+          the app wiring yourself: an async connector and a task registered under
+          an explicit name. <code>uv run pytest challenges/ch02</code> runs a real
+          worker against your app.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch01.html"><span class="dir">← Previous</span>Why a task queue — and why Postgres</a>
+        <a class="next" href="ch03.html"><span class="dir">Next →</span>Defining and deferring tasks</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

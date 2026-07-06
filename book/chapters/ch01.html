@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 1 · Why a task queue — and why Postgres — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY. Chapter 1 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch01.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 1 · Why a task queue — and why Postgres — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY. Chapter 1 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch01.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 1 · Why a task queue — and why Postgres — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY. Chapter 1 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 1,
+  "name": "Why a task queue — and why Postgres",
+  "description": "What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY.",
+  "url": "{{PAGES_URL}}chapters/ch01.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "nextItem": "{{PAGES_URL}}chapters/ch02.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html" class="current"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 1 · Part I — Foundations</p>
+      <h1>Why a task queue — and why Postgres</h1>
+      <p class="lede">
+        Every web application eventually hits the same wall: a user clicks a button,
+        and the work behind that click takes longer than a user is willing to stare
+        at a spinner. Task queues exist to move that work somewhere else. This
+        chapter builds the vocabulary the rest of the course runs on, then makes
+        the argument Procrastinate itself makes: you may not need a message broker,
+        because you already have PostgreSQL.
+      </p>
+
+      <h2>The problem background jobs solve</h2>
+      <p>
+        Suppose your checkout endpoint sends a confirmation email. The email
+        provider's API usually answers in 200 milliseconds, occasionally in
+        30 seconds, and sometimes not at all. If the endpoint calls that API
+        directly, its slowest dependency sets the user's wait time, a failed email
+        turns into a failed checkout, and a burst of orders becomes a burst of slow
+        requests tying up your web processes.
+      </p>
+      <p>
+        The task-queue answer is to split the work in two. The endpoint records an
+        intention: "someone should send this email, with these arguments." A
+        separate process, called a <strong>worker</strong>, picks up that recorded
+        intention later and does the actual work. The recorded intention is a
+        <strong>job</strong>; the function the worker runs is a
+        <strong>task</strong>; and the place jobs wait between those two moments is
+        the <strong>queue</strong>, which lives inside a piece of infrastructure
+        called a <strong>broker</strong>. In Procrastinate's vocabulary, a task is
+        a Python function you register, and a job is "the launching of a specific
+        task with specific values for the keyword arguments." The
+        <a href="https://procrastinate.readthedocs.io/en/stable/glossary.html" target="_blank" rel="noopener">glossary</a>
+        pins these terms down if you ever want the formal versions.
+      </p>
+      <p>
+        This split buys you three separate things. The user's request finishes as
+        soon as the intention is recorded, not when the email lands. The work
+        survives crashes, because the job exists independently of the process that
+        created it. And the work can be retried, spread across machines, delayed,
+        or rate-limited, because it's now data you can reason about instead of a
+        stack frame in a web process.
+      </p>
+
+      <h2>The broker question</h2>
+      <p>
+        Celery, the best-known Python task queue, expects you to run RabbitMQ or
+        Redis as the broker. That's an entire additional piece of stateful
+        infrastructure: something to deploy, monitor, back up, and page someone
+        about. Procrastinate's position, stated plainly in its
+        <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">design discussions</a>,
+        is that if you already operate PostgreSQL, "maintaining a RabbitMQ/Redis/…
+        service is double the trouble." The queue goes in the database you already
+        have.
+      </p>
+      <p>
+        Storing jobs in Postgres has a second consequence that's easy to
+        underestimate: your queue becomes ordinary data. You can inspect stuck
+        jobs with <code>SELECT</code>, count failures by task name with
+        <code>GROUP BY</code>, and join jobs against your own tables. With a
+        dedicated broker, that kind of visibility means learning its admin tooling;
+        here it's the SQL you already know. The docs make the same point: browsing
+        and editing jobs is easier "because interacting with data in a standard
+        database [is] a lot easier" than with a specialized broker.
+      </p>
+      <p>
+        The honest counterweight is throughput. A dedicated broker exists because
+        it's very good at exactly one thing, and a busy jobs table adds real load
+        to a database that also serves your application. Procrastinate doesn't
+        publish benchmark numbers, and this course won't invent any; the working
+        assumption that carries most teams is that if your job volume is a
+        problem for Postgres, you'll see it in the same monitoring you already
+        point at Postgres. For the workloads most applications actually have,
+        thousands of jobs an hour rather than millions a minute, the operational
+        simplicity wins.
+      </p>
+
+      <aside class="callout underhood">
+        <span class="callout-title">🔬 Under the hood</span>
+        <p>
+          Two Postgres features make the whole design safe and fast. Row locking
+          (<code>SELECT … FOR UPDATE</code>) guarantees that "when a worker starts
+          executing a job, it's the only one" — two workers can't grab the same
+          row. And <code>LISTEN/NOTIFY</code> means workers don't sit in a poll
+          loop asking "anything for me?": deferring a job sends a notification
+          that wakes listening workers immediately. Workers still poll on a timer
+          as a backstop, "just in case" a notification is missed.
+        </p>
+        <p class="source">Source: <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">Procrastinate discussions — how it works</a></p>
+      </aside>
+
+      <h2>A job is a row</h2>
+      <p>
+        Everything above stays abstract until you watch it happen. The script
+        below defers two jobs (one that will succeed, one written to fail) and
+        reads their status out of the database before and after running a worker.
+        Don't worry about the setup details yet; that's chapter 2. Watch the
+        statuses.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch01_lifecycle.py</figcaption>
+        <pre><code class="language-python">import asyncio
+
+from examples.common import make_app
+
+app = make_app()
+
+
+@app.task
+async def send_confirmation(order_id: int) -> None:
+    print(f"  [task] sending confirmation for order {order_id}")
+
+
+@app.task
+async def flaky_export(report: str) -> None:
+    raise RuntimeError(f"export of {report!r} blew up")
+
+
+async def show_status(label: str, job_ids: list[int]) -> None:
+    statuses = [(await app.job_manager.get_job_status_async(job_id)).value for job_id in job_ids]
+    print(f"{label}: {statuses}")
+
+
+async def main() -> None:
+    async with app.open_async():
+        job_ids = [
+            await send_confirmation.defer_async(order_id=1042),
+            await flaky_export.defer_async(report="q2-revenue"),
+        ]
+        await show_status("before the worker runs", job_ids)
+
+        await app.run_worker_async(wait=False)
+
+        await show_status("after the worker runs ", job_ids)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output (worker's error log trimmed)</figcaption>
+        <pre><code class="language-text">before the worker runs: ['todo', 'todo']
+  [task] sending confirmation for order 1042
+Job __main__.flaky_export[3](report='q2-revenue') ended with status: Error, lasted 0.000 s
+Traceback (most recent call last):
+  ...
+RuntimeError: export of 'q2-revenue' blew up
+after the worker runs : ['succeeded', 'failed']</code></pre>
+      </figure>
+
+      <p>
+        Both jobs start as <code>todo</code>: rows in a table named
+        <code>procrastinate_jobs</code>, holding the task's name, its arguments as
+        JSON, and a status column. The worker moves each row to <code>doing</code>
+        while it runs the function, then to <code>succeeded</code> or
+        <code>failed</code>. Note what <em>didn't</em> happen when
+        <code>flaky_export</code> raised: the script kept going, the other job
+        completed, and the failure became a recorded fact you could query tomorrow.
+        A crash in a background job is data, not a disaster.
+      </p>
+      <p>
+        The full state machine, from the
+        <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">discussions page</a>,
+        adds three states you'll meet in later chapters: a failed job whose retry
+        policy allows another attempt goes back to <code>todo</code> (chapter 5), a
+        job cancelled before any worker picks it up becomes <code>cancelled</code>,
+        and a running job that's asked to stop becomes <code>aborted</code>
+        (chapter 8).
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          "The queue is a table" is also the escape hatch when things go wrong at
+          2am. Every debugging trick you know for ordinary rows (looking at them,
+          counting them, updating one by hand in an emergency) applies to your
+          job queue. Chapter 12 builds proper tooling for this, but the floor is
+          already high: <code>psql</code> is a queue inspector.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run the lifecycle demo yourself (after the one-time setup in the
+          <a href="{{REPO_URL}}" target="_blank" rel="noopener">repo README</a>):
+          <code>uv run python -m examples.ch01_lifecycle</code>. Then run it again
+          and check the job ids keep climbing: the old rows are still there.
+        </p>
+        <p>
+          The challenge for this chapter is <code>challenges/ch01/challenge.py</code>:
+          implement the job state machine as a plain Python function, from the
+          transition table in its docstring. <code>uv run pytest challenges/ch01</code>
+          until everything passes.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a class="next" href="ch02.html"><span class="dir">Next →</span>Setup: your first job, end to end</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

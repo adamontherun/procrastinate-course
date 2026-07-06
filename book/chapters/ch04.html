@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 4 · Workers up close — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up. Chapter 4 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch04.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 4 · Workers up close — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up. Chapter 4 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch04.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 4 · Workers up close — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up. Chapter 4 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 4,
+  "name": "Workers up close",
+  "description": "Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up.",
+  "url": "{{PAGES_URL}}chapters/ch04.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch03.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch05.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html" class="current"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 4 · Part I — Foundations</p>
+      <h1>Workers up close</h1>
+      <p class="lede">
+        A worker is a loop: fetch a job, run it, record the result, repeat. The
+        interesting engineering lives in the adverbs. How does it fetch a job the
+        moment one appears? How does it run four jobs at once in one process?
+        Which queues does it watch? This chapter answers those with measured
+        timings from the course database and a walk through a real worker's log.
+      </p>
+
+      <h2>Starting one</h2>
+      <p>
+        In production a worker is usually its own process, started with the CLI:
+        <code>procrastinate --app=path.to.app worker</code>, plus queue names if
+        you want a subset. From code, the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/worker.html" target="_blank" rel="noopener">worker guide</a>
+        offers two entry points that differ in who owns the lifecycle:
+        <code>app.run_worker()</code> is self-contained (it starts an event loop,
+        opens the app, and closes both when done), while
+        <code>await app.run_worker_async()</code> expects the app to already be
+        open; that's the embeddable form chapter 10 threads into FastAPI. Every
+        example so far has used the pattern worth committing to memory for
+        scripts and tests: <code>wait=False</code>, which stops the worker when
+        the queue runs dry instead of idling for more.
+      </p>
+
+      <h2>Queues route work; concurrency overlaps it</h2>
+      <p>
+        A worker given <code>queues=["slow"]</code> only ever fetches jobs whose
+        queue column says <code>slow</code>; a worker given nothing listens to
+        every queue. Queues are how you keep a pile of bulk exports from delaying
+        password-reset emails: run one worker per class of work, sized to it.
+        Queues appear the first time something uses them: there's nothing to
+        declare or create.
+      </p>
+      <p>
+        Concurrency is the other axis. By default a worker runs one job at a
+        time (<code>concurrency=1</code> in the
+        <a href="https://github.com/procrastinate-org/procrastinate/blob/main/procrastinate/worker.py" target="_blank" rel="noopener">worker's signature</a>).
+        Setting it higher runs that many <em>async sub-workers</em> on one event
+        loop, which pays off exactly when tasks spend their time awaiting I/O:
+        "while a job is waiting for external I/O (usually network), the CPU is
+        free to run other jobs," as the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/concurrency.html" target="_blank" rel="noopener">concurrency guide</a>
+        puts it. Here's both axes measured, with four jobs that each
+        <code>await asyncio.sleep(1)</code>:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch04_worker_tour.py (core)</figcaption>
+        <pre><code class="language-python">@app.task(queue="slow")
+async def simulate_io(call_id: int) -> None:
+    await asyncio.sleep(1)  # stands in for an HTTP call or a big query
+
+
+@app.task(queue="reports")
+async def nightly_report() -> None:
+    print("  [nightly_report] ran")
+
+
+# defer 4 simulate_io jobs and 1 nightly_report job, then:
+await app.run_worker_async(queues=["slow"], wait=False)
+await app.run_worker_async(queues=["slow"], concurrency=4, wait=False)</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">concurrency=1: 4 one-second jobs took 4.1s
+job on the 'reports' queue is still: todo
+concurrency=4: 4 one-second jobs took 1.0s
+  [nightly_report] ran</code></pre>
+      </figure>
+
+      <p>
+        Serial execution costs the sum (4.1 seconds); four sub-workers cost
+        roughly the longest job (1.0 second). And the <code>reports</code> job
+        sat untouched at <code>todo</code> through both runs because neither
+        worker was listening to its queue. Routing is absolute, not advisory.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          Concurrency &gt; 1 buys nothing if the task blocks the event loop. A
+          task that calls <code>time.sleep(1)</code>, or does heavy computation,
+          or uses a blocking HTTP client like <code>requests</code>, freezes all
+          sub-workers for that second. Blocking work belongs in sync tasks,
+          which run in threads (chapter 9), or in more worker processes rather
+          than more sub-workers.
+        </p>
+      </aside>
+
+      <h2>How fetching actually works</h2>
+      <p>
+        Chapter 1 previewed the mechanism; the worker log makes it concrete.
+        Here's a real session: defer a job with the CLI, then run a verbose
+        worker for five seconds.
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">terminal (procrastinate -v … worker, trimmed)</figcaption>
+        <pre><code class="language-text">$ uv run procrastinate --app=examples.hello_world.app defer examples.hello_world.greet '{"name": "the CLI"}'
+Launching a job: examples.hello_world.greet(name='the CLI')
+INFO:procrastinate.jobs:Deferred 1 job
+
+$ uv run procrastinate -v --app=examples.hello_world.app worker
+Launching a worker on all queues
+DEBUG:procrastinate.worker:Registered worker 3 in the database
+INFO:procrastinate.worker.worker:Starting worker on all queues
+DEBUG:procrastinate.signals:Installing signal handler
+DEBUG:procrastinate.worker:Waiting for 10.0s before updating worker heartbeat
+INFO:procrastinate.periodic:No periodic task found, periodic deferrer will not run.
+INFO:procrastinate.worker.worker:Starting job examples.hello_world.greet[4](name='the CLI')
+INFO:procrastinate.worker:Job examples.hello_world.greet[4](name='the CLI') ended with status: Success, lasted 0.000 s
+DEBUG:procrastinate.worker:waiting for 5.0s before querying jobs to abort
+^C
+INFO:procrastinate.worker.worker:Stop requested
+INFO:procrastinate.worker.worker:Stopped worker on all queues</code></pre>
+      </figure>
+
+      <p>
+        Reading top to bottom: the worker registers itself in the database (a
+        row with a heartbeat, which chapter 12 uses to detect dead workers),
+        installs signal handlers so Ctrl-C shuts it down cleanly, checks for
+        periodic tasks (chapter 6), runs our job, and settles into its waiting
+        rhythm. That waiting is a belt-and-suspenders design: the worker
+        <code>LISTEN</code>s for the notification Postgres sends when a job is
+        deferred, so pickup is effectively immediate, and it <em>also</em> polls
+        every 5 seconds by default (<code>fetch_job_polling_interval=5.0</code>,
+        verified against the installed 3.9.0 source) in case a notification
+        was missed. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">discussions page</a>
+        describes exactly this: notifications for latency, polling "just in case."
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          The LISTEN/NOTIFY connection is a real, dedicated database connection
+          per worker, on top of the pool (10 connections by default, the
+          <code>psycopg_pool</code> default). On a big fleet, or behind a
+          connection pooler that doesn't support LISTEN, you can trade latency
+          for connections:
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/connections.html" target="_blank" rel="noopener"><code>listen_notify=False</code></a>
+          disables the notification channel and leaves fetching to the polling
+          interval alone.
+        </p>
+      </aside>
+
+      <h2>Worker options you'll actually set</h2>
+      <p>
+        The full option list lives on
+        <a href="https://procrastinate.readthedocs.io/en/stable/api.html" target="_blank" rel="noopener">App.run_worker's API page</a>;
+        beyond <code>queues</code>, <code>concurrency</code>, and
+        <code>wait</code>, two more come up repeatedly in this course.
+        <code>name=</code> labels the worker in logs and in its database
+        registration, which matters as soon as you run more than one.
+        <code>install_signal_handlers=False</code> tells the worker not to claim
+        SIGINT/SIGTERM for itself, so it can live inside a larger application
+        that has its own shutdown story; that's chapter 10's FastAPI embedding.
+        Rather than passing these at every call site, an app can set
+        <code>worker_defaults={...}</code> once at construction.
+      </p>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch04_worker_tour</code> and compare
+          your timings. Then open two terminals: a verbose CLI worker in one
+          (<code>uv run procrastinate -v --app=examples.hello_world.app worker</code>),
+          and defer jobs at it from the other. Watch how fast pickup is, then
+          try it again after killing and restarting Postgres.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch04/challenge.py</code>, is
+          <code>drain_queue()</code>: run a worker constrained to one queue and a
+          concurrency level, and prove with the clock that the overlap happened.
+          <code>uv run pytest challenges/ch04</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch03.html"><span class="dir">← Previous</span>Defining and deferring tasks</a>
+        <a class="next" href="ch05.html"><span class="dir">Next →</span>Retries and failure</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

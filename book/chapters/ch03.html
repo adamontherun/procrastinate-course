@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 3 · Defining and deferring tasks — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases. Chapter 3 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch03.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 3 · Defining and deferring tasks — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases. Chapter 3 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch03.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 3 · Defining and deferring tasks — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases. Chapter 3 of Procrastinate: Task Queues on Postgres, Part I · Foundations.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 3,
+  "name": "Defining and deferring tasks",
+  "description": "Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases.",
+  "url": "{{PAGES_URL}}chapters/ch03.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch02.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch04.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html" class="current"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 3 · Part I — Foundations</p>
+      <h1>Defining and deferring tasks</h1>
+      <p class="lede">
+        A task is a decorated function; a job is one scheduled run of it. That
+        sounds like the whole story, and for the first week of using
+        Procrastinate it is. This chapter covers what the first week hides: how
+        tasks get their names, what <code>configure()</code> can override at
+        defer time, how to enqueue a thousand jobs in one round trip, and the
+        one rule about arguments that bites everyone eventually.
+      </p>
+
+      <h2>Task anatomy</h2>
+      <p>
+        The <code>@app.task</code> decorator registers a function with the app.
+        With no arguments the parentheses are optional; with arguments you set
+        the task's defaults, most of which later chapters treat in depth:
+        <code>queue</code> here and in chapter 4, <code>retry</code> in
+        chapter 5, <code>lock</code>, <code>queueing_lock</code>, and
+        <code>priority</code> in chapter 7, <code>pass_context</code> in
+        chapter 8. Two parameters are worth settling now. First,
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/tasks.html" target="_blank" rel="noopener">tasks can be sync or async functions</a>:
+        async tasks all share the worker's event loop, while "each sync task runs
+        in its own thread." Chapter 9 unpacks what that means for you; until
+        then the examples stay async.
+      </p>
+      <p>
+        Second, <code>name</code>. A task's default name is its module path plus
+        the function name (<code>examples.hello_world.greet</code>), and that
+        string, not the function object, is what gets stored in the job row and
+        looked up by workers. Renaming a module or moving a function silently
+        renames every task in it, and jobs already in the queue still carry the
+        old name. Setting an explicit <code>name=</code> decouples your queue's
+        stable vocabulary from your codebase's layout. It isn't required, but on
+        any project expected to survive a refactor, it's cheap insurance.
+      </p>
+
+      <h2>Five ways to defer</h2>
+      <p>
+        The example below defers jobs five ways; every one of them ran against
+        the course database to produce the output that follows.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch03_defer_options.py (core)</figcaption>
+        <pre><code class="language-python">@app.task(queue="emails")
+async def send_email(to: str, subject: str) -> None:
+    print(f"  [send_email] to={to!r} subject={subject!r}")
+
+
+# 1. Plain defer: arguments must be keyword arguments.
+job_id = await send_email.defer_async(to="ada@example.com", subject="Welcome")
+
+# 2. configure() overrides task defaults for one deferral.
+await send_email.configure(queue="urgent").defer_async(
+    to="ops@example.com", subject="Disk is full"
+)
+
+# 3. A reusable pattern: pre-bind some kwargs, defer the rest.
+weekly = send_email.configure(task_kwargs={"subject": "Your weekly digest"})
+await weekly.defer_async(to="ada@example.com")
+await weekly.defer_async(to="charles@example.com")
+
+# 4. Deferring by name, without importing the task.
+await app.configure_task(
+    name="reports:examples.ch03_blueprint_tasks.build"
+).defer_async(name="q2-revenue")
+
+# 5. Batch defer: one round trip for many jobs.
+ids = await send_email.batch_defer_async(
+    {"to": "u1@example.com", "subject": "hi"},
+    {"to": "u2@example.com", "subject": "hi"},
+)</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">deferred job 1 on queue 'emails'
+batch deferred jobs [6, 7]
+defer with a date object failed: Object of type date is not JSON serializable
+  [send_email] to='ada@example.com' subject='Welcome'
+  [send_email] to='ops@example.com' subject='Disk is full'
+  [send_email] to='ada@example.com' subject='Your weekly digest'
+  [send_email] to='charles@example.com' subject='Your weekly digest'
+  [reports.build] building report 'q2-revenue'
+  [send_email] to='u1@example.com' subject='hi'
+  [send_email] to='u2@example.com' subject='hi'</code></pre>
+      </figure>
+
+      <p>
+        <code>defer_async()</code> returns the new job's integer id, the same id
+        you saw in <code>list_jobs</code> and the same primary key you'd find in
+        the table. <code>configure()</code> is the general mechanism behind
+        variants 2 and 3: it returns a deferrer with some settings overridden
+        (queue, lock, priority, scheduling, all
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/defer.html" target="_blank" rel="noopener">listed in the defer guide</a>).
+        With <code>task_kwargs</code> it becomes a reusable partial
+        application, deferred many times with the remaining arguments.
+        Variant 4, <code>app.configure_task(name=...)</code>, defers purely by
+        the task's string name, which is how one service can enqueue work for
+        another without importing its code. It's also completely unchecked: the
+        name is only resolved when a worker tries to run the job, so a typo
+        surfaces as a failed job, not as an exception where you deferred it.
+      </p>
+      <p>
+        Variant 5, <code>batch_defer_async()</code>, inserts all the jobs in a
+        single database operation, which is the difference between one round trip
+        and a thousand when a nightly fan-out enqueues per-user work. One caveat
+        from the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/batch_defer.html" target="_blank" rel="noopener">batch-defer guide</a>
+        to file away for chapter 7: don't put two jobs sharing a queueing lock in
+        the same batch, because the resulting <code>AlreadyEnqueued</code> error
+        rolls back the entire batch.
+      </p>
+
+      <h2>Arguments travel as JSON</h2>
+      <p>
+        Job arguments are serialized with <code>json.dumps</code> into the job
+        row, which imposes the JSON type system on everything you pass:
+        strings, numbers, booleans, <code>None</code>, lists, dicts. The example
+        deliberately passes a <code>datetime.date</code>, and the defer call
+        itself, not the worker later, raises
+        <code>TypeError: Object of type date is not JSON serializable</code>.
+        Failing at defer time is the good version of this problem; you're still
+        in the code that knows what it meant.
+      </p>
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          The subtler version is types JSON <em>can</em> represent but doesn't
+          round-trip: a tuple arrives as a list, and dict keys that were integers
+          arrive as strings. The worker sees whatever <code>json.loads</code>
+          produces, not what you passed. If you need richer types, the connector
+          accepts custom
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/custom_json_encoder_decoder.html" target="_blank" rel="noopener"><code>json_dumps</code>/<code>json_loads</code> functions</a>;
+          the pragmatic default is to pass ids and look the objects up in the
+          task, which also avoids stale data when the job runs an hour later.
+        </p>
+      </aside>
+
+      <h2>Blueprints: tasks without an app</h2>
+      <p>
+        The decorator pattern has a structural weakness: <code>@app.task</code>
+        needs the app at import time, so every module of tasks imports your app
+        module, and reusable packages can't ship tasks at all without knowing
+        about your project. A
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/blueprints.html" target="_blank" rel="noopener"><code>Blueprint</code></a>
+        is the same registry without the app:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch03_blueprint_tasks.py</figcaption>
+        <pre><code class="language-python">from procrastinate import Blueprint
+
+reports = Blueprint()
+
+
+@reports.task
+async def build(name: str) -> None:
+    print(f"  [reports.build] building report {name!r}")</code></pre>
+      </figure>
+
+      <p>
+        The app adopts it with
+        <code>app.add_tasks_from(reports, namespace="reports")</code>. The
+        namespace prefixes every task name, preventing collisions between
+        packages. The exact format is worth knowing because you'll see it in
+        job rows and need it for defer-by-name: the namespace, a colon, then the
+        task's original dotted name. That's why variant 4 above used
+        <code>reports:examples.ch03_blueprint_tasks.build</code>. Our first
+        draft guessed <code>reports.build</code>, and the worker failed the job
+        with <code>TaskNotFound</code>. An explicit <code>name=</code> on the
+        blueprint task would have made this predictable:
+        <code>@reports.task(name="build")</code> yields
+        <code>reports:build</code>.
+      </p>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch03_defer_options</code>, then use
+          chapter 2's shell (<code>shell list_jobs</code>) to see how each
+          deferral was recorded: check which queue the "Disk is full" job
+          landed on.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch03/challenge.py</code>, gives you an
+          open app and has you write three deferral helpers: plain kwargs, a
+          <code>configure()</code> reroute, and a batch.
+          <code>uv run pytest challenges/ch03</code> verifies each job row.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch02.html"><span class="dir">← Previous</span>Setup: your first job, end to end</a>
+        <a class="next" href="ch04.html"><span class="dir">Next →</span>Workers up close</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>
