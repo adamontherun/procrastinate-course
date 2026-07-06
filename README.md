@@ -5,7 +5,9 @@ the Python task queue that uses PostgreSQL as its broker — no Redis, no Rabbit
 Thirteen chapters, every example run against a real Postgres database, every
 challenge backed by real failing tests.
 
-[![Read the Book](https://img.shields.io/badge/📖_Read_the_Book-{{PAGES_HOST_PATH}}-b45309)]({{PAGES_URL}})
+[![Read the Book](https://img.shields.io/badge/📖_Read_the_Book-adamontherun.github.io/procrastinate-course-b45309)](https://adamontherun.github.io/procrastinate-course/)
+
+[![Course cover: sidebar table of contents, hero copy, and part-by-part chapter list](book/assets/screenshots/homepage.png)](https://adamontherun.github.io/procrastinate-course/)
 
 This repo is two things: **the book** (13 chapters of prose, nothing to
 install) and **the code** (runnable examples and failing-test challenges,
@@ -22,7 +24,7 @@ already running.
 
 ## Setup
 
-Don't want to install anything? Open [the book]({{PAGES_URL}}) and click
+Don't want to install anything? Open [the book](https://adamontherun.github.io/procrastinate-course/) and click
 "Launch Codespace" in any chapter's sidebar — it opens a cloud dev
 environment with Postgres already running.
 

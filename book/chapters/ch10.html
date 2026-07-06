@@ -8,21 +8,21 @@
 <meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
 <meta name="author" content="Adam Smith">
 <meta name="robots" content="index, follow">
-<link rel="canonical" href="{{PAGES_URL}}chapters/ch10.html">
+<link rel="canonical" href="https://adamontherun.github.io/procrastinate-course/chapters/ch10.html">
 
 <meta property="og:type" content="article">
 <meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
 <meta property="og:title" content="Ch 10 · Procrastinate in FastAPI — Procrastinate: Task Queues on Postgres">
 <meta property="og:description" content="Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process. Chapter 10 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
-<meta property="og:url" content="{{PAGES_URL}}chapters/ch10.html">
-<meta property="og:image" content="{{OG_IMAGE_URL}}">
-<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
-<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+<meta property="og:url" content="https://adamontherun.github.io/procrastinate-course/chapters/ch10.html">
+<meta property="og:image" content="https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="862">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Ch 10 · Procrastinate in FastAPI — Procrastinate: Task Queues on Postgres">
 <meta name="twitter:description" content="Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process. Chapter 10 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
-<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="twitter:image" content="https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png">
 <meta name="theme-color" content="#b45309">
 <script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
 <link rel="stylesheet" href="../assets/style.css">
@@ -33,12 +33,12 @@
   "position": 10,
   "name": "Procrastinate in FastAPI",
   "description": "Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process.",
-  "url": "{{PAGES_URL}}chapters/ch10.html",
-  "image": "{{OG_IMAGE_URL}}",
+  "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch10.html",
+  "image": "https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png",
   "inLanguage": "en",
-  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
-  "previousItem": "{{PAGES_URL}}chapters/ch09.html",
-  "nextItem": "{{PAGES_URL}}chapters/ch11.html"
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "https://adamontherun.github.io/procrastinate-course/"},
+  "previousItem": "https://adamontherun.github.io/procrastinate-course/chapters/ch09.html",
+  "nextItem": "https://adamontherun.github.io/procrastinate-course/chapters/ch11.html"
 }
 </script>
 </head>
@@ -50,8 +50,8 @@
     <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
 
     <div class="sidebar-links">
-      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
-      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+      <a class="codespace-link" href="https://codespaces.new/adamontherun/procrastinate-course" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="https://github.com/adamontherun/procrastinate-course" target="_blank" rel="noopener">GitHub repo &#8599;</a>
     </div>
 
     <nav aria-label="Chapters">
@@ -221,7 +221,7 @@ $ curl -s http://localhost:8123/jobs/1     # one second later
       <div class="tryit">
         <h3>⚡ Try it</h3>
         <p class="tryit-env">
-          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+          No local setup? <a href="https://codespaces.new/adamontherun/procrastinate-course" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — Postgres is already running there.
         </p>
         <p>
           Start the app (<code>uv run uvicorn examples.ch10_fastapi.web:api --port 8123</code>)

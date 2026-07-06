@@ -8,21 +8,21 @@
 <meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
 <meta name="author" content="Adam Smith">
 <meta name="robots" content="index, follow">
-<link rel="canonical" href="{{PAGES_URL}}">
+<link rel="canonical" href="https://adamontherun.github.io/procrastinate-course/">
 
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
 <meta property="og:title" content="Procrastinate: Task Queues on Postgres — a hands-on course">
 <meta property="og:description" content="A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.">
-<meta property="og:url" content="{{PAGES_URL}}">
-<meta property="og:image" content="{{OG_IMAGE_URL}}">
-<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
-<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+<meta property="og:url" content="https://adamontherun.github.io/procrastinate-course/">
+<meta property="og:image" content="https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="862">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Procrastinate: Task Queues on Postgres — a hands-on course">
 <meta name="twitter:description" content="A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.">
-<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="twitter:image" content="https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png">
 <meta name="theme-color" content="#b45309">
 <script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
 <link rel="stylesheet" href="assets/style.css">
@@ -32,13 +32,25 @@
   "@type": "Course",
   "name": "Procrastinate: Task Queues on Postgres",
   "description": "A free hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — 13 chapters with runnable examples, failing-test challenges, and citations to the real docs.",
-  "url": "{{PAGES_URL}}",
-  "image": "{{OG_IMAGE_URL}}",
-  "provider": {"@type": "Person", "name": "Adam Smith", "url": "{{AUTHOR_URL}}"},
+  "url": "https://adamontherun.github.io/procrastinate-course/",
+  "image": "https://adamontherun.github.io/procrastinate-course/assets/screenshots/homepage.png",
+  "provider": {"@type": "Person", "name": "Adam Smith", "url": "https://github.com/adamontherun"},
   "isAccessibleForFree": true,
   "inLanguage": "en",
   "hasPart": [
-    {"@type": "Chapter", "position": 1, "name": "{{CHAPTER_TITLE}}", "description": "{{ONE_LINE_CHAPTER_HOOK}}", "url": "{{PAGES_URL}}chapters/ch{{CH_NUM_PADDED}}.html"}
+    {"@type": "Chapter", "position": 1, "name": "Why a task queue — and why Postgres", "description": "What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch01.html"},
+    {"@type": "Chapter", "position": 2, "name": "Setup: your first job, end to end", "description": "Install, connect, apply the schema, defer one job, and watch a worker pick it up.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch02.html"},
+    {"@type": "Chapter", "position": 3, "name": "Defining and deferring tasks", "description": "Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch03.html"},
+    {"@type": "Chapter", "position": 4, "name": "Workers up close", "description": "Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch04.html"},
+    {"@type": "Chapter", "position": 5, "name": "Retries and failure", "description": "The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch05.html"},
+    {"@type": "Chapter", "position": 6, "name": "Scheduling: later and every hour", "description": "One-off future jobs with schedule_at/schedule_in, and periodic tasks with cron — including who defers them when you run five workers.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch06.html"},
+    {"@type": "Chapter", "position": 7, "name": "Locks, queueing locks, priorities", "description": "Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch07.html"},
+    {"@type": "Chapter", "position": 8, "name": "Context, cancellation, middleware", "description": "Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch08.html"},
+    {"@type": "Chapter", "position": 9, "name": "Sync and async together", "description": "Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch09.html"},
+    {"@type": "Chapter", "position": 10, "name": "Procrastinate in FastAPI", "description": "Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch10.html"},
+    {"@type": "Chapter", "position": 11, "name": "Testing your tasks", "description": "InMemoryConnector, asserting on deferred jobs, and running a real worker inside a test when it's worth it.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch11.html"},
+    {"@type": "Chapter", "position": 12, "name": "Operating in production", "description": "Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch12.html"},
+    {"@type": "Chapter", "position": 13, "name": "Deploying workers on AWS ECS", "description": "Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys.", "url": "https://adamontherun.github.io/procrastinate-course/chapters/ch13.html"}
   ]
 }
 </script>
@@ -51,8 +63,8 @@
     <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
 
     <div class="sidebar-links">
-      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
-      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+      <a class="codespace-link" href="https://codespaces.new/adamontherun/procrastinate-course" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="https://github.com/adamontherun/procrastinate-course" target="_blank" rel="noopener">GitHub repo &#8599;</a>
     </div>
 
     <nav aria-label="Chapters">
@@ -102,9 +114,9 @@
         every chapter ends with a challenge you solve by making failing tests pass.
       </p>
       <p>
-        Click <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener"><strong>Launch Codespace</strong></a>
+        Click <a href="https://codespaces.new/adamontherun/procrastinate-course" target="_blank" rel="noopener"><strong>Launch Codespace</strong></a>
         in the sidebar for a ready-to-go environment, or clone the
-        <a href="{{REPO_URL}}" target="_blank" rel="noopener">repo</a> and run
+        <a href="https://github.com/adamontherun/procrastinate-course" target="_blank" rel="noopener">repo</a> and run
         <code>uv sync &amp;&amp; docker compose up -d</code> locally.
       </p>
 

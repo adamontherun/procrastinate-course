@@ -1,0 +1,35 @@
+# Procrastinate: Task Queues on Postgres
+
+> A hands-on course on Procrastinate 3, the Python task queue built on PostgreSQL — thirteen chapters with runnable examples, failing-test challenges, and citations to the real docs.
+
+Every example was run against a real Postgres database; load-bearing claims link to official docs.
+
+## Part I · Foundations
+
+- [Why a task queue — and why Postgres](https://adamontherun.github.io/procrastinate-course/chapters/ch01.html): What background jobs actually are, and how a database becomes a broker with SELECT FOR UPDATE and LISTEN/NOTIFY.
+- [Setup: your first job, end to end](https://adamontherun.github.io/procrastinate-course/chapters/ch02.html): Install, connect, apply the schema, defer one job, and watch a worker pick it up.
+- [Defining and deferring tasks](https://adamontherun.github.io/procrastinate-course/chapters/ch03.html): Task anatomy, configure(), batch deferring, JSON argument limits, and blueprints for larger codebases.
+- [Workers up close](https://adamontherun.github.io/procrastinate-course/chapters/ch04.html): Queues, concurrency, how jobs are fetched the instant they're deferred — and the polling that backs it up.
+
+## Part II · Controlling execution
+
+- [Retries and failure](https://adamontherun.github.io/procrastinate-course/chapters/ch05.html): The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry.
+- [Scheduling: later and every hour](https://adamontherun.github.io/procrastinate-course/chapters/ch06.html): One-off future jobs with schedule_at/schedule_in, and periodic tasks with cron — including who defers them when you run five workers.
+- [Locks, queueing locks, priorities](https://adamontherun.github.io/procrastinate-course/chapters/ch07.html): Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first.
+- [Context, cancellation, middleware](https://adamontherun.github.io/procrastinate-course/chapters/ch08.html): Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware.
+
+## Part III · Sync and the web
+
+- [Sync and async together](https://adamontherun.github.io/procrastinate-course/chapters/ch09.html): Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary.
+- [Procrastinate in FastAPI](https://adamontherun.github.io/procrastinate-course/chapters/ch10.html): Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process.
+
+## Part IV · Production
+
+- [Testing your tasks](https://adamontherun.github.io/procrastinate-course/chapters/ch11.html): InMemoryConnector, asserting on deferred jobs, and running a real worker inside a test when it's worth it.
+- [Operating in production](https://adamontherun.github.io/procrastinate-course/chapters/ch12.html): Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small.
+- [Deploying workers on AWS ECS](https://adamontherun.github.io/procrastinate-course/chapters/ch13.html): Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys.
+
+## Optional
+
+- [Source repo](https://github.com/adamontherun/procrastinate-course): runnable examples, failing-test challenges, and reference solutions
+- [Open in GitHub Codespaces](https://codespaces.new/adamontherun/procrastinate-course): zero-install environment with Postgres is already running there
