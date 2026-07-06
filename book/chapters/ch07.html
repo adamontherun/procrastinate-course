@@ -153,12 +153,14 @@ same lock, 0.2s polling:        1.2s</code></pre>
       <aside class="callout gotcha">
         <span class="callout-title">⚠ Gotcha</span>
         <p>
-          Two blocking scenarios from the
-          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/locks.html" target="_blank" rel="noopener">locks guide</a>
-          are worth memorizing. A locked job scheduled for the future blocks
-          every later job on that lock until it runs. And a locked job stuck
-          in <code>doing</code> because its worker died blocks the lock until
-          something resolves it (chapter 12's stalled-job recovery). The one
+          Two blocking scenarios are worth memorizing. From the
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/locks.html" target="_blank" rel="noopener">locks guide</a>:
+          a locked job scheduled for the future blocks every later job on
+          that lock until it runs. And from the
+          <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">discussions page</a>:
+          a locked job stuck in <code>doing</code> because its worker died
+          blocks the lock until the job is manually resolved (chapter 12's
+          stalled-job recovery automates that). The one
           consolation is structural: "a job can only take a single lock so
           there's no dead-lock scenario possible," as the
           <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">discussions page</a>
@@ -209,7 +211,7 @@ after the queue drained, deferring cleanup worked again</code></pre>
         <p>
           Priorities don't starve gracefully. The docs warn that in a system
           whose workers are always busy, a job with lower priority than the
-          steady influx "could potentially wait months." If some class of work
+          steady influx "could potentially take months to execute." If some class of work
           must always make progress, give it its own queue and its own workers
           (chapter 4) instead of a priority number. Capacity isolates;
           priority only reorders.

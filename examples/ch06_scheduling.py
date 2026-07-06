@@ -16,7 +16,7 @@ async def reminder(text: str) -> None:
     print(f"  [reminder] {text}")
 
 
-# A 6-column cron expression: the extra first-position column is seconds,
+# A 6-column cron expression: the extra sixth (last) column is seconds,
 # so this fires once per second — handy for a demo, silly in production.
 @app.periodic(cron="* * * * * *")
 @app.task

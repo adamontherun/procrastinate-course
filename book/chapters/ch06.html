@@ -106,8 +106,9 @@
         <code>scheduled_at</code> column is set. Per the
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/schedule.html" target="_blank" rel="noopener">scheduling guide</a>,
         you set it either absolutely, with
-        <code>configure(schedule_at=some_datetime)</code> (the datetime must be
-        timezone-aware), or relatively, with
+        <code>configure(schedule_at=some_datetime)</code> — a naive datetime is
+        rejected with <code>ValueError: Timezone aware datetime is required</code>
+        (enforcement verified against 3.9.0) — or relatively, with
         <code>configure(schedule_in={"hours": 1, "minutes": 30})</code>, whose
         keys are Python <code>timedelta</code> arguments. Workers simply refuse
         to fetch a job before its time. The guide is precise about what the
@@ -123,7 +124,7 @@
     text="2 seconds later"
 )
 
-# A 6-column cron expression: the extra first-position column is seconds,
+# A 6-column cron expression: the extra sixth (last) column is seconds,
 # so this fires once per second — handy for a demo, silly in production.
 @app.periodic(cron="* * * * * *")
 @app.task

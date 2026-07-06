@@ -181,8 +181,9 @@ abort while running: status=aborted</code></pre>
 
       <h2>Middleware: wrap every task once</h2>
       <p>
-        New in the 3.x line, middleware is a callable that wraps task
-        execution, with the signature
+        New in 3.9.0 (this course's exact version — older 3.x releases don't
+        have it), middleware is a callable that wraps task execution, with
+        the signature
         <code>(call_next, context, worker)</code>. Call
         <code>call_next()</code> to run the next layer (ultimately the task),
         and do your before/after work around it:
