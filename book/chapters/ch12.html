@@ -160,8 +160,10 @@
         told you the extra cost: any locks those jobs hold stay blocked. The
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/retry_stalled_jobs.html" target="_blank" rel="noopener">stalled-jobs guide</a>
         defines the detection rule (a job is stalled when its worker hasn't
-        heartbeated for <code>stalled_worker_timeout</code>, 30 seconds by
-        default) and the fix: find them, retry them. We manufactured the
+        heartbeated for <code>get_stalled_jobs</code>'
+        <code>seconds_since_heartbeat</code>, 30 seconds by default; the
+        worker-side <code>stalled_worker_timeout</code>, also 30, governs
+        pruning such workers) and the fix: find them, retry them. We manufactured the
         disaster deliberately:
       </p>
 
@@ -211,13 +213,15 @@ after retry_job: status=todo</code></pre>
         procrastinate_jobs GROUP BY status</code> is a metrics exporter away
         from a graph, and the
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/events.html" target="_blank" rel="noopener">events table</a>
-        adds per-transition timestamps (deferred, started, retried, failed),
-        though the docs label that API early-stage. For errors, procrastinate
-        logs every failure with the exception attached, under the logger name
+        adds per-transition timestamps (deferred, started,
+        deferred_for_retry, failed, succeeded), though the docs label that
+        API early-stage. For errors: everything logs under the logger name
         <code>procrastinate</code>, each record carrying an <code>action</code>
         attribute naming the event, per the
-        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/logging.html" target="_blank" rel="noopener">logging guide</a>.
-        That's exactly what Sentry-style tools ingest via their logging
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/logging.html" target="_blank" rel="noopener">logging guide</a>,
+        and job failures are logged with the exception attached
+        (<code>exc_info</code>, verified in the 3.9.0 worker source). That's
+        exactly what Sentry-style tools ingest via their logging
         integrations.
       </p>
 

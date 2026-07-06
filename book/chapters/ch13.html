@@ -143,9 +143,14 @@ CMD ["procrastinate", "worker", "--concurrency=10", "--shutdown-graceful-timeout
 
       <h2>Prove the shutdown locally</h2>
       <p>
-        <code>docker stop</code> sends SIGTERM, waits, then SIGKILLs (the
-        same sequence ECS uses), so the deployment's most delicate behavior
-        can be verified on a laptop. We started the container against the
+        Per the
+        <a href="https://docs.docker.com/reference/cli/docker/container/stop/" target="_blank" rel="noopener">Docker CLI reference</a>,
+        <code>docker stop</code> sends SIGTERM, waits a grace period, then
+        SIGKILLs — and the
+        <a href="https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_StopTask.html" target="_blank" rel="noopener">ECS StopTask API</a>
+        issues "the equivalent of <code>docker stop</code>," defaulting to
+        SIGTERM. So the deployment's most delicate behavior can be verified
+        on a laptop. We started the container against the
         course database, deferred a five-second job, and stopped the
         container two seconds in:
       </p>
