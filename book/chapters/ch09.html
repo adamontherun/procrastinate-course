@@ -105,9 +105,10 @@
         what that choice buys. The
         <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">design discussion</a>
         explains the machinery: sync tasks run through
-        <code>asgiref.sync.sync_to_async</code>, each in its own thread, so a
-        blocking call doesn't freeze the worker's event loop the way it would
-        inside an async task (chapter 4's gotcha). The thread names are right
+        <code>asgiref.sync.sync_to_async</code>, each on a thread from a
+        shared pool (concurrent tasks get separate threads; idle threads get
+        reused), so a blocking call doesn't freeze the worker's event loop
+        the way it would inside an async task (chapter 4's gotcha). The thread names are right
         there in the output:
       </p>
 
@@ -204,9 +205,10 @@ running a worker here: SyncConnectorConfigurationError</code></pre>
         said so; here's the enforcement). A sync program hands work over the
         wall; somewhere else, an async worker process picks it up. For
         SQLAlchemy codebases there's even a connector that
-        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/sync_defer.html" target="_blank" rel="noopener">shares the engine's connection pool</a>
-        (<code>SQLAlchemyPsycopg2Connector</code>), so deferring doesn't cost a
-        second pool.
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/sync_defer.html" target="_blank" rel="noopener">can share your engine's connection pool</a>
+        (<code>SQLAlchemyPsycopg2Connector</code> — pass your existing engine
+        to <code>app.open()</code>, or it creates its own), so deferring
+        needn't cost a second pool.
       </p>
 
       <aside class="callout production">
