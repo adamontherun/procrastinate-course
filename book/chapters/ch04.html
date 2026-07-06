@@ -244,9 +244,11 @@ INFO:procrastinate.worker.worker:Stopped worker on all queues</code></pre>
         <a href="https://procrastinate.readthedocs.io/en/stable/reference.html#procrastinate.App.run_worker" target="_blank" rel="noopener">App.run_worker's API reference</a>;
         beyond <code>queues</code>, <code>concurrency</code>, and
         <code>wait</code>, two more come up repeatedly in this course.
-        <code>name=</code> labels the worker in its log lines, which matters as
-        soon as you run more than one. (The database registration row itself
-        carries only an id and a heartbeat, not the name.)
+        <code>name=</code> labels the worker in its log lines and is passed
+        into <code>JobContext.worker_name</code> for tasks with
+        <code>pass_context=True</code>, which matters as soon as you run more
+        than one. (The database registration row itself carries only an id and
+        a heartbeat, not the name.)
         <code>install_signal_handlers=False</code> tells the worker not to claim
         SIGINT/SIGTERM for itself, so it can live inside a larger application
         that has its own shutdown story; that's chapter 10's FastAPI embedding.

@@ -215,9 +215,10 @@ after retry_job: status=todo</code></pre>
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/events.html" target="_blank" rel="noopener">events table</a>
         adds per-transition timestamps (deferred, started,
         deferred_for_retry, failed, succeeded), though the docs label that
-        API early-stage. For errors: everything logs under the logger name
-        <code>procrastinate</code>, each record carrying an <code>action</code>
-        attribute naming the event, per the
+        API early-stage. For errors: configure the root
+        <code>procrastinate</code> logger (workers emit through child loggers
+        like <code>procrastinate.worker</code>), and most worker records carry
+        an <code>action</code> extra naming the event, per the
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/logging.html" target="_blank" rel="noopener">logging guide</a>,
         and job failures are logged with the exception attached
         (<code>exc_info</code>, verified in the 3.9.0 worker source). That's
@@ -230,9 +231,10 @@ after retry_job: status=todo</code></pre>
         The schema you applied in chapter 2 belongs to procrastinate 3.9.0;
         upgrading the library eventually means migrating it. Migrations ship
         inside the package as plain SQL files
-        (<code>procrastinate schema --migrations-path</code> prints where),
-        named for the version they belong to and marked <code>pre</code> or
-        <code>post</code>, per the
+        (<code>procrastinate schema --migrations-path</code> prints where).
+        Since the 3.x line, filenames include the version and a
+        <code>pre</code> or <code>post</code> marker; older legacy migrations
+        in the same directory omit that suffix. See the
         <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/migrations.html" target="_blank" rel="noopener">migrations guide</a>.
         The simple workflow stops everything: apply all migrations, upgrade
         the library, restart. The zero-downtime workflow interleaves per
