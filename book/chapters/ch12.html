@@ -131,14 +131,14 @@
       <aside class="callout gotcha">
         <span class="callout-title">⚠ Gotcha</span>
         <p>
-          We hit a sharp edge here while writing this course's test suite —
+          We hit a sharp edge here while writing this course's test suite:
           a long-known upstream bug
-          (<a href="https://github.com/procrastinate-org/procrastinate/issues/521">procrastinate #521</a>,
-          open since 2022, still present in 3.9.0):
+          (<a href="https://github.com/procrastinate-org/procrastinate/issues/521" target="_blank" rel="noopener">procrastinate #521</a>,
+          open since 2022, still present in 3.9.0).
           <code>add_tasks_from</code> renames a blueprint's task objects in
           place, so every <code>App()</code> constructed in a process
-          re-registers the builtin tasks and, in doing so, mutates the shared
-          task object's name: the first app knows the task as
+          re-registers the builtin tasks against the same shared task
+          objects: the first app knows the task as
           <code>builtin:procrastinate.builtin_tasks.remove_old_jobs</code>,
           the second as <code>builtin:builtin:…</code>, and so on. Defer the
           builtin in a multi-app process (a test suite, most likely) and the

@@ -228,6 +228,17 @@ signatures rather than trusting prose.
 - Custom schema: https://procrastinate.readthedocs.io/en/stable/howto/production/schema.html
   - `kwargs={"options": "-c search_path=myschema"}` then `schema --apply`.
 
+## Ch 12 addendum — builtin task name drift
+
+- Reproduced: each App() constructed in a process re-prefixes the shared
+  builtin blueprint tasks' names ("builtin:builtin:..."), eventually
+  overflowing varchar(128). Known upstream:
+  https://github.com/procrastinate-org/procrastinate/issues/521
+  ("Blueprints get duplicate namespace prefixes in tests", open since
+  2022-01-06; verified via GitHub API 2026-07-05, still open).
+- Safe patterns: defer via app.configure_task(name="procrastinate.builtin_tasks.remove_old_jobs")
+  (stable alias) or call job_manager.delete_old_jobs(nb_hours=...) directly.
+
 ## Ch 13 — ECS
 
 - ECS task definition params (fetched 2026-07-05):
