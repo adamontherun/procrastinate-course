@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 10 · Procrastinate in FastAPI — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process. Chapter 10 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch10.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 10 · Procrastinate in FastAPI — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process. Chapter 10 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch10.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 10 · Procrastinate in FastAPI — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process. Chapter 10 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 10,
+  "name": "Procrastinate in FastAPI",
+  "description": "Defer jobs from endpoints, embed a worker in the lifespan — and why production usually wants a separate worker process.",
+  "url": "{{PAGES_URL}}chapters/ch10.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch09.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch11.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html" class="current"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 10 · Part III — Sync and the web</p>
+      <h1>Procrastinate in FastAPI</h1>
+      <p class="lede">
+        FastAPI and Procrastinate share an event loop model, which makes the
+        integration almost suspiciously small: open the app at startup, defer
+        from endpoints, and optionally run a worker inside the web process
+        itself. This chapter builds that app, verifies it over real HTTP, and
+        then argues with its own architecture, because the embedded worker has
+        a place, and that place is not most production systems.
+      </p>
+
+      <h2>Two modules, on purpose</h2>
+      <p>
+        The task queue gets its own module, exactly as chapter 2's
+        app-placement rules demand. The web module imports from it; so could a
+        standalone worker process later, with
+        <code>procrastinate --app=examples.ch10_fastapi.tasks.app worker</code>.
+        Nothing about the tasks knows the web framework exists.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch10_fastapi/tasks.py</figcaption>
+        <pre><code class="language-python">app = procrastinate.App(
+    connector=procrastinate.PsycopgConnector(conninfo=DSN),
+)
+
+
+@app.task(queue="emails")
+async def send_welcome(email: str) -> None:
+    await asyncio.sleep(0.5)  # stands in for the SMTP conversation
+    print(f"  [send_welcome] sent to {email}")</code></pre>
+      </figure>
+
+      <h2>The lifespan owns the machinery</h2>
+      <p>
+        FastAPI's
+        <a href="https://fastapi.tiangolo.com/advanced/events/" target="_blank" rel="noopener">lifespan context manager</a>
+        is the natural home for both halves of the setup: opening the
+        connection pool, and (for the embedded flavor) starting the worker as
+        an asyncio task. This mirrors the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/basics/worker.html" target="_blank" rel="noopener">official FastAPI example</a>
+        in the worker guide, including its two load-bearing details:
+        <code>install_signal_handlers=False</code>, because uvicorn owns
+        SIGINT/SIGTERM in this process (chapter 4 previewed this), and a
+        shutdown that cancels the worker task and waits, bounded by a timeout.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch10_fastapi/web.py</figcaption>
+        <pre><code class="language-python">@asynccontextmanager
+async def lifespan(api: FastAPI) -> AsyncIterator[None]:
+    async with task_queue.open_async():
+        worker = asyncio.create_task(
+            task_queue.run_worker_async(install_signal_handlers=False)
+        )
+        yield
+        worker.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(worker, timeout=10)
+
+
+api = FastAPI(lifespan=lifespan)
+
+
+@api.post("/signup", status_code=202)
+async def signup(email: str) -> dict:
+    job_id = await send_welcome.defer_async(email=email)
+    return {"job_id": job_id}
+
+
+@api.get("/jobs/{job_id}")
+async def job_status(job_id: int) -> dict:
+    status = await task_queue.job_manager.get_job_status_async(job_id)
+    return {"job_id": job_id, "status": status.value}</code></pre>
+      </figure>
+
+      <p>
+        The endpoint pattern is the one to internalize regardless of where the
+        worker lives: <code>202 Accepted</code> plus a job id, not a completed
+        result. The client got a promise, and the job id is a real handle it
+        can poll. Here's the whole loop over actual HTTP, uvicorn on one side,
+        curl on the other:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">terminal</figcaption>
+        <pre><code class="language-text">$ uv run uvicorn examples.ch10_fastapi.web:api --port 8123
+$ curl -s -X POST 'http://localhost:8123/signup?email=ada@example.com'
+{"job_id":1}
+$ curl -s http://localhost:8123/jobs/1     # immediately
+{"job_id":1,"status":"doing"}
+$ curl -s http://localhost:8123/jobs/1     # one second later
+{"job_id":1,"status":"succeeded"}
+
+# meanwhile, in the uvicorn log:
+  [send_welcome] sent to ada@example.com</code></pre>
+      </figure>
+
+      <h2>Embedded or separate?</h2>
+      <p>
+        The embedded worker is genuinely convenient: one process to run, one
+        thing to deploy, and jobs start instantly in development. It's the
+        right shape for small apps and demos. Its costs show up with scale.
+        The worker competes with request handlers for the same event loop and
+        CPU; scaling the web tier out multiplies workers whether or not the
+        queue needs them; and a worker mid-job extends every web deploy's
+        shutdown. Separating them (this same <code>tasks.py</code>, run by
+        <code>procrastinate worker</code> in its own container) restores
+        independent scaling and lifecycles, and chapter 13 deploys exactly
+        that split.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          While building this chapter we spent twenty minutes on a job that
+          failed instantly with no traceback in the server log. The cause: a
+          forgotten worker from an earlier chapter was still running against
+          the same database, listening on <em>all</em> queues. It won the race
+          for the new job, couldn't import
+          <code>examples.ch10_fastapi.tasks.send_welcome</code>, and failed it
+          with <code>TaskNotFound</code>. Any worker that can reach your
+          database is part of your system, whether you remember it or not. If
+          several apps must share one Postgres, give each its own
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/schema.html" target="_blank" rel="noopener">schema via search_path</a>.
+          Separate queues are not enough, because default workers listen
+          everywhere.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Start the app (<code>uv run uvicorn examples.ch10_fastapi.web:api --port 8123</code>)
+          and replay the curl session. Then convert it to the separated
+          architecture: delete the worker lines from the lifespan, and run
+          <code>PYTHONPATH=. uv run procrastinate --app=examples.ch10_fastapi.tasks.app worker</code>
+          in a second terminal. The curl session should behave identically.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch10/challenge.py</code>: write the
+          lifespan-shaped plumbing yourself (an async context manager that
+          runs an embedded worker and shuts it down cleanly), plus the
+          202-style signup handler. <code>uv run pytest challenges/ch10</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch09.html"><span class="dir">← Previous</span>Sync and async together</a>
+        <a class="next" href="ch11.html"><span class="dir">Next →</span>Testing your tasks</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

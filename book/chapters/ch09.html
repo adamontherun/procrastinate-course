@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 9 · Sync and async together — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary. Chapter 9 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch09.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 9 · Sync and async together — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary. Chapter 9 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch09.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 9 · Sync and async together — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary. Chapter 9 of Procrastinate: Task Queues on Postgres, Part III · Sync and the web.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 9,
+  "name": "Sync and async together",
+  "description": "Sync connectors, deferring from synchronous code, and the RuntimeError waiting for you at the boundary.",
+  "url": "{{PAGES_URL}}chapters/ch09.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch08.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch10.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html" class="current"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 9 · Part III — Sync and the web</p>
+      <h1>Sync and async together</h1>
+      <p class="lede">
+        Procrastinate is async at heart, and honest about why: a task queue has
+        to call your code, so the worker must speak your code's dialect. But
+        most codebases aren't purely one or the other, and the library meets
+        them where they are: sync task functions, sync deferring, sync
+        connectors. Each accommodation has a boundary, and this chapter maps
+        where the boundaries actually run.
+      </p>
+
+      <h2>Sync tasks run in threads</h2>
+      <p>
+        You've been able to write <code>def</code> tasks since chapter 3; here's
+        what that choice buys. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">design discussion</a>
+        explains the machinery: sync tasks run through
+        <code>asgiref.sync.sync_to_async</code>, each in its own thread, so a
+        blocking call doesn't freeze the worker's event loop the way it would
+        inside an async task (chapter 4's gotcha). The thread names are right
+        there in the output:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch09_sync_tasks.py (excerpt)</figcaption>
+        <pre><code class="language-python">@app.task
+def blocking_call(n: int) -> None:
+    time.sleep(0.5)
+    print(f"  [blocking_call] {n} ran on thread {threading.current_thread().name!r}")</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">  [blocking_call] 0 ran on thread 'asyncio_0'
+  [blocking_call] 1 ran on thread 'asyncio_1'
+  [blocking_call] 2 ran on thread 'asyncio_2'
+3 blocking half-second tasks, concurrency=3: 0.5s</code></pre>
+      </figure>
+
+      <p>
+        Three <code>time.sleep(0.5)</code> calls, three threads, half a second
+        total. This is the correct home for blocking HTTP clients, file I/O,
+        and libraries that were never taught <code>await</code>. The flip side:
+        threads mean the usual thread-safety rules apply to anything the tasks
+        share, and Python's GIL still serializes CPU-bound work, so this trick
+        parallelizes <em>waiting</em>, not computation.
+      </p>
+
+      <h2>Deferring from sync code</h2>
+      <p>
+        Every defer method has a sync twin (<code>defer()</code> for
+        <code>defer_async()</code>, and so on), and the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/sync_defer.html" target="_blank" rel="noopener">sync-defer guide</a>
+        describes what happens underneath: an async connector conjures a
+        synchronous counterpart for those calls. But there's a boundary with a
+        sharp edge. Sync methods on an opened async app only work from truly
+        synchronous territory, like inside a sync job's thread. Call one from
+        code that's actually running on the event loop and you get this,
+        captured live:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">sync defer inside the event loop: RuntimeError: You cannot use AsyncToSync in the
+same thread as an async event loop - just await the async function directly.</code></pre>
+      </figure>
+
+      <p>
+        The error's advice is the fix: if you're in async code, use
+        <code>defer_async()</code>. The sync methods exist for the code that
+        can't.
+      </p>
+
+      <h2>The fully synchronous program</h2>
+      <p>
+        Some programs have no event loop at all: cron scripts, WSGI apps,
+        management commands. For those,
+        <code>SyncPsycopgConnector</code> gives you a real synchronous
+        connection pool, no asyncio anywhere:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch09_sync_defer.py</figcaption>
+        <pre><code class="language-python">app = procrastinate.App(
+    connector=procrastinate.SyncPsycopgConnector(conninfo=DSN),
+)
+
+
+def main() -> None:
+    with app.open():
+        job_id = app.configure_task(name="examples.hello_world.greet").defer(
+            name="from sync land"
+        )
+        print(f"deferred job {job_id} without an event loop")
+
+        # A sync connector defers; it does not work.
+        try:
+            app.run_worker(wait=False)
+        except procrastinate.exceptions.SyncConnectorConfigurationError as exc:
+            print(f"running a worker here: {type(exc).__name__}")</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">deferred job 4 without an event loop
+running a worker here: SyncConnectorConfigurationError</code></pre>
+      </figure>
+
+      <p>
+        That exception is the chapter's central rule surfacing as code. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/sync_defer.html" target="_blank" rel="noopener">docs state it flatly</a>:
+        with a synchronous connector, "the only thing you'll be able to do is
+        defer tasks." Workers require an async connector, always (chapter 2
+        said so; here's the enforcement). A sync program hands work over the
+        wall; somewhere else, an async worker process picks it up. For
+        SQLAlchemy codebases there's even a connector that
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/sync_defer.html" target="_blank" rel="noopener">shares the engine's connection pool</a>
+        (<code>SQLAlchemyPsycopg2Connector</code>), so deferring doesn't cost a
+        second pool.
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          This split is an architecture, not a workaround: web processes (sync
+          or async) defer with whatever connector suits them, and a separate
+          worker fleet with async connectors executes. The two halves share
+          nothing but the database. Chapter 10 shows the one setup where they
+          share a process, and chapter 13 deploys the separated version.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch09_sync_tasks</code>, then
+          change <code>blocking_call</code> from <code>def</code> to
+          <code>async def</code> (keeping <code>time.sleep</code>!) and watch
+          the timing go from 0.5s to 1.6s (we measured both): the event-loop
+          freeze from chapter 4, reproduced on purpose. Then run
+          <code>uv run python -m examples.ch09_sync_defer</code> and pick its
+          job up with the chapter 2 worker.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch09/challenge.py</code>: write the
+          sync half of the wall (a plain function that defers by task name
+          through a sync connector) and prove a thread-per-task speedup.
+          <code>uv run pytest challenges/ch09</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch08.html"><span class="dir">← Previous</span>Context, cancellation, middleware</a>
+        <a class="next" href="ch10.html"><span class="dir">Next →</span>Procrastinate in FastAPI</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>
