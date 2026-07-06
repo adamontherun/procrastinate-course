@@ -54,7 +54,8 @@ Reference solutions live in `solutions/`. No peeking until the tests pass.
 
 ## Resetting the database
 
-Examples clean up after themselves, but if you ever want a pristine database:
+Examples leave their finished jobs in the table on purpose — chapter 2 pokes
+through that history. If you ever want a pristine database:
 
 ```sh
 docker compose down -v && docker compose up -d
