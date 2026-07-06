@@ -1,0 +1,21 @@
+# Layers a dev-tooling service on top of the course's own compose.yaml,
+# purely for Codespaces/devcontainer use. Local development never touches
+# this file — plain `docker compose up -d` only starts Postgres, exactly
+# as before.
+services:
+  app:
+    image: mcr.microsoft.com/devcontainers/python:3.12
+    # "." resolves against the project root (compose.yaml's directory),
+    # not this file's directory.
+    volumes:
+      - .:/workspaces/procrastinate:cached
+    command: sleep infinity
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Sharing the postgres service's network namespace means "localhost"
+    # inside app IS the database's network stack. compose.yaml sets
+    # PGPORT=5441 so Postgres listens on 5441 internally, matching the
+    # host mapping — every example's hardcoded localhost:5441 works both
+    # locally and in Codespaces with nothing to reconcile.
+    network_mode: service:postgres

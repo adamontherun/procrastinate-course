@@ -1,0 +1,37 @@
+{
+  "name": "Procrastinate: Task Queues on Postgres",
+
+  "dockerComposeFile": ["../compose.yaml", "docker-compose.extend.yml"],
+  "service": "app",
+  "workspaceFolder": "/workspaces/procrastinate",
+
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/va-h/devcontainers-features/uv:1": {}
+  },
+
+  "postCreateCommand": "uv sync && PYTHONPATH=. uv run procrastinate --app=examples.hello_world.app schema --apply",
+
+  "forwardPorts": [5441],
+  "portsAttributes": {
+    "5441": { "label": "Postgres (course database)", "onAutoForward": "silent" }
+  },
+
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "ms-python.mypy-type-checker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": ".venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  }
+}
