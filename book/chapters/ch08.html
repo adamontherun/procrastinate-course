@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 8 · Context, cancellation, middleware — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware. Chapter 8 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch08.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 8 · Context, cancellation, middleware — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware. Chapter 8 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch08.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 8 · Context, cancellation, middleware — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware. Chapter 8 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 8,
+  "name": "Context, cancellation, middleware",
+  "description": "Reach into the running job with JobContext, abort jobs that are already executing, and wrap every task with middleware.",
+  "url": "{{PAGES_URL}}chapters/ch08.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch07.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch09.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html" class="current"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 8 · Part II — Controlling execution</p>
+      <h1>Context, cancellation, middleware</h1>
+      <p class="lede">
+        Three tools for the space between "the job runs" and "the job runs the
+        way production needs it to." <code>JobContext</code> lets a task see
+        its own execution: which job, which worker, which attempt.
+        Cancellation stops work, including work already in flight. And
+        middleware wraps every task with the logging, timing, and tracing you
+        don't want copy-pasted into each one.
+      </p>
+
+      <h2>JobContext: the job, from the inside</h2>
+      <p>
+        Add <code>pass_context=True</code> to the decorator and the task's
+        first argument becomes a
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/context.html" target="_blank" rel="noopener"><code>JobContext</code></a>:
+        the full <code>job</code> row (id, queue, attempts, kwargs), the
+        worker's name and queues, and a <code>should_abort()</code> method
+        we'll need shortly.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch08_context_cancel_middleware.py (excerpt)</figcaption>
+        <pre><code class="language-python">@app.task(pass_context=True)
+async def introspect(context: JobContext) -> None:
+    job = context.job
+    print(
+        f"  [introspect] job {job.id} ({job.task_name}) on queue {job.queue!r}, "
+        f"attempt {job.attempts}, run by worker {context.worker_name!r}"
+    )</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">  [introspect] job 45 (__main__.introspect) on queue 'default', attempt 0, run by worker 'demo-worker'</code></pre>
+      </figure>
+
+      <p>
+        The context also carries <code>additional_context</code>: a dict you
+        pass to <code>run_worker_async(additional_context={...})</code>, useful
+        for handing every task a shared HTTP session or database handle owned
+        by the worker. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/context.html" target="_blank" rel="noopener">docs are explicit about its limits</a>:
+        it's one mutable dict shared by all concurrent tasks, it isn't
+        persisted anywhere, and it "is not supposed to be used for passing
+        data from a task to a future task." For task-to-task data, use the
+        database you're already sitting on.
+      </p>
+
+      <h2>Stopping jobs</h2>
+      <p>
+        A job that hasn't started is easy:
+        <code>app.job_manager.cancel_job_by_id_async(job_id)</code> moves a
+        <code>todo</code> row to <code>cancelled</code> (add
+        <code>delete_job=True</code> to remove the row entirely). A job that's
+        already running is more interesting. Passing <code>abort=True</code>
+        flags the job, and the worker learns about it through the same
+        two-channel design as job fetching: a Postgres notification, backed by
+        polling (<code>abort_job_polling_interval</code>, 5 seconds by
+        default in the installed 3.9.0).
+      </p>
+      <p>
+        What happens next depends on the task's flavor, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/cancellation.html" target="_blank" rel="noopener">cancellation guide</a>.
+        An async task is cancelled through asyncio: <code>CancelledError</code>
+        is raised at its current await point, and if some section must not be
+        interrupted, you shield it and re-raise. A sync task can't be
+        interrupted from outside at all; it has to cooperate by checking
+        <code>context.should_abort()</code> periodically and raising
+        <code>JobAborted</code>. Either way the row ends up
+        <code>aborted</code>:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">cancel before pickup: cancelled=True, status=cancelled
+  [long_running] cancelled mid-flight
+abort while running: status=aborted</code></pre>
+      </figure>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          Abortion trumps retry policy: "when a job is requested to abort and
+          that job fails, it will not be retried (regardless of the retry
+          strategy)." Sensible (the human asked it to stop), but surprising
+          if you expected your <code>retry=</code> to resurrect it.
+        </p>
+        <p class="source">Source: <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/cancellation.html" target="_blank" rel="noopener">Procrastinate docs — cancellation</a></p>
+      </aside>
+
+      <h2>Middleware: wrap every task once</h2>
+      <p>
+        New in the 3.x line, middleware is a callable that wraps task
+        execution, with the signature
+        <code>(call_next, context, worker)</code>. Call
+        <code>call_next()</code> to run the next layer (ultimately the task),
+        and do your before/after work around it:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch08_context_cancel_middleware.py (excerpt)</figcaption>
+        <pre><code class="language-python">async def time_tasks(call_next, context, worker):
+    start = time.perf_counter()
+    try:
+        return await call_next()
+    finally:
+        elapsed = time.perf_counter() - start
+        print(f"  [middleware] {context.task.name} took {elapsed:.2f}s")
+
+
+await app.run_worker_async(wait=False, task_middleware=[time_tasks])</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">  [introspect] job 48 (__main__.introspect) on queue 'default', attempt 0, run by worker 'worker'
+  [middleware] __main__.introspect took 0.00s</code></pre>
+      </figure>
+
+      <p>
+        There are two registration points and one matching rule, laid out in
+        the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/middleware.html" target="_blank" rel="noopener">middleware guide</a>.
+        Task middleware runs in the task's own context, so it must match the
+        task's flavor: <code>async def</code> middleware for async tasks,
+        plain <code>def</code> for sync tasks (which run in threads). Worker
+        middleware is always async and wraps every job regardless of flavor.
+        The chain runs worker middleware, then worker-wide task middleware,
+        then per-task middleware (via <code>@app.task(task_middleware=[...])</code>),
+        then the task. And one rule matters more than the rest: middleware
+        must let exceptions propagate. Chapter 5's retries and the job's
+        failure status both depend on the exception reaching the worker;
+        <code>try</code>/<code>finally</code> is your friend,
+        <code>except: pass</code> is sabotage.
+      </p>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch08_context_cancel_middleware</code>.
+          Then modify <code>long_running</code> to shield a critical section
+          (the cancellation guide shows the <code>asyncio.shield</code>
+          pattern) and confirm the shielded part completes even when aborted.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch08/challenge.py</code>: an audit
+          middleware that records start/ok/error for every job without
+          breaking failure semantics, plus the abort call. The test checks
+          that your middleware didn't swallow the exception.
+          <code>uv run pytest challenges/ch08</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch07.html"><span class="dir">← Previous</span>Locks, queueing locks, priorities</a>
+        <a class="next" href="ch09.html"><span class="dir">Next →</span>Sync and async together</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

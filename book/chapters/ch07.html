@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 7 · Locks, queueing locks, priorities — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first. Chapter 7 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch07.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 7 · Locks, queueing locks, priorities — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first. Chapter 7 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch07.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 7 · Locks, queueing locks, priorities — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first. Chapter 7 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 7,
+  "name": "Locks, queueing locks, priorities",
+  "description": "Serialize jobs that touch the same resource, stop duplicate jobs from piling up, and decide who goes first.",
+  "url": "{{PAGES_URL}}chapters/ch07.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch06.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch08.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html" class="current"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 7 · Part II — Controlling execution</p>
+      <h1>Locks, queueing locks, priorities</h1>
+      <p class="lede">
+        Ten workers are a blessing until two of them sync the same customer's
+        account at the same time. This chapter covers Procrastinate's three
+        ordering tools: locks, which force jobs that share a resource to run
+        one at a time; queueing locks, which stop duplicate jobs from piling up
+        in the queue; and priorities, which decide who goes first when there's
+        a line. It also includes a latency surprise we measured while writing
+        it.
+      </p>
+
+      <h2>Locks: one at a time, in order</h2>
+      <p>
+        Set <code>lock=</code> to any string, at the task level or per-deferral
+        with <code>configure()</code>. Jobs sharing a lock string execute
+        serially: per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/locks.html" target="_blank" rel="noopener">locks guide</a>,
+        "the second task cannot run before the first one has ended
+        (successfully or not)," and among waiting locked jobs, higher priority
+        goes first, then older ones. The lock string usually names the shared
+        resource: a customer id, an account UUID, a file path.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch07_locks.py (excerpt)</figcaption>
+        <pre><code class="language-python">@app.task
+async def sync_account(account: str, step: int) -> None:
+    await asyncio.sleep(0.5)
+    print(f"  [sync_account] {account} step {step} done")
+
+# Same lock: these two jobs cannot overlap, even with concurrency=2.
+await sync_account.configure(lock="account-42").defer_async(account="42", step=1)
+await sync_account.configure(lock="account-42").defer_async(account="42", step=2)
+
+# Different locks: the same two jobs overlap freely.
+await sync_account.configure(lock="account-1").defer_async(account="1", step=1)
+await sync_account.configure(lock="account-2").defer_async(account="2", step=1)</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output (worker with concurrency=2)</figcaption>
+        <pre><code class="language-text">same lock, concurrency=2:       5.6s
+different locks, concurrency=2: 0.6s
+same lock, 0.2s polling:        1.2s</code></pre>
+      </figure>
+
+      <p>
+        The middle line is what you'd predict: two half-second jobs with
+        nothing in common finish together. The first line is the surprise.
+        Two half-second jobs sharing a lock took 5.6 seconds, not 1.1, because
+        of how the handoff works: finishing a job doesn't notify workers that
+        a lock has been released, so the second job waited for the worker's
+        next scheduled poll of the database. At chapter 4's default
+        <code>fetch_job_polling_interval</code> of 5 seconds, that's a
+        worst-case 5-second gap between consecutive locked jobs. The third
+        line is the same pair with 0.2-second polling: 1.2 seconds total. If
+        your workload leans on locks for throughput-sensitive chains, the
+        polling interval is now a latency knob, and its cost is one cheap
+        query per tick.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          Two blocking scenarios from the
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/locks.html" target="_blank" rel="noopener">locks guide</a>
+          are worth memorizing. A locked job scheduled for the future blocks
+          every later job on that lock until it runs. And a locked job stuck
+          in <code>doing</code> because its worker died blocks the lock until
+          something resolves it (chapter 12's stalled-job recovery). The one
+          consolation is structural: "a job can only take a single lock so
+          there's no dead-lock scenario possible," as the
+          <a href="https://procrastinate.readthedocs.io/en/stable/discussions.html" target="_blank" rel="noopener">discussions page</a>
+          puts it.
+        </p>
+      </aside>
+
+      <h2>Queueing locks: at most one in line</h2>
+      <p>
+        An execution lock doesn't stop the queue from filling with duplicates;
+        it only slows their draining. For "don't pile these up" there's
+        <code>queueing_lock=</code>: per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/queueing_locks.html" target="_blank" rel="noopener">queueing-locks guide</a>,
+        at most one job with a given queueing lock can be in <code>todo</code>
+        status. Deferring a second one raises <code>AlreadyEnqueued</code>:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">second defer refused: Job cannot be enqueued: there is already a job in the queue
+with the queueing lock nightly-cleanup
+  [cleanup] ran
+after the queue drained, deferring cleanup worked again</code></pre>
+      </figure>
+
+      <p>
+        Catch the exception and move on; a refused duplicate is the feature
+        working. Two fine points: only <code>todo</code> counts, so a job that
+        has started running (<code>doing</code>) no longer blocks new
+        deferrals, and chapter 3's warning applies here: two jobs with the
+        same queueing lock in one <code>batch_defer</code> roll the whole
+        batch back.
+      </p>
+
+      <h2>Priorities: who goes first</h2>
+      <p>
+        Every job has an integer <code>priority</code>, default 0, settable on
+        the task, in <code>configure()</code>, or from the CLI. Larger numbers
+        win, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/priorities.html" target="_blank" rel="noopener">priorities guide</a>,
+        and priority only orders jobs that are <em>available</em>: a worker
+        won't idle waiting for a locked high-priority job when a lower-priority
+        one is runnable, and nothing preempts a job that's already running.
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          Priorities don't starve gracefully. The docs warn that in a system
+          whose workers are always busy, a job with lower priority than the
+          steady influx "could potentially wait months." If some class of work
+          must always make progress, give it its own queue and its own workers
+          (chapter 4) instead of a priority number. Capacity isolates;
+          priority only reorders.
+        </p>
+        <p class="source">Source: <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/priorities.html" target="_blank" rel="noopener">Procrastinate docs — priorities</a></p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch07_locks</code> and reproduce
+          the 5.6s / 0.6s / 1.2s spread. Then change the demo's lock strings
+          and polling interval and see how far you can push the handoff
+          latency down.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch07/challenge.py</code>: defer a
+          chain of per-account steps that provably run in order under
+          concurrency, and a cleanup deferral that returns <code>None</code>
+          instead of raising when a duplicate is refused.
+          <code>uv run pytest challenges/ch07</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch06.html"><span class="dir">← Previous</span>Scheduling: later and every hour</a>
+        <a class="next" href="ch08.html"><span class="dir">Next →</span>Context, cancellation, middleware</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 6 · Scheduling: later and every hour — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="One-off future jobs with schedule_at and schedule_in, and periodic cron tasks — including who defers them when you run five workers. Chapter 6 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch06.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 6 · Scheduling: later and every hour — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="One-off future jobs with schedule_at and schedule_in, and periodic cron tasks — including who defers them when you run five workers. Chapter 6 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch06.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 6 · Scheduling: later and every hour — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="One-off future jobs with schedule_at and schedule_in, and periodic cron tasks — including who defers them when you run five workers. Chapter 6 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 6,
+  "name": "Scheduling: later and every hour",
+  "description": "One-off future jobs with schedule_at and schedule_in, and periodic cron tasks — including who defers them when you run five workers.",
+  "url": "{{PAGES_URL}}chapters/ch06.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch05.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch07.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html" class="current"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 6 · Part II — Controlling execution</p>
+      <h1>Scheduling: later and every hour</h1>
+      <p class="lede">
+        Two kinds of "later" show up in every system. One-off delays: send the
+        follow-up email in three days, expire the trial in a month. And
+        recurring schedules: rebuild the report every hour, clean up every
+        night. Procrastinate handles the first with two arguments to
+        <code>configure()</code>, and the second with a cron decorator whose
+        most interesting property is what it <em>doesn't</em> need: a separate
+        scheduler process.
+      </p>
+
+      <h2>One-off future jobs</h2>
+      <p>
+        A job scheduled for the future is an ordinary job row whose
+        <code>scheduled_at</code> column is set. Per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/schedule.html" target="_blank" rel="noopener">scheduling guide</a>,
+        you set it either absolutely, with
+        <code>configure(schedule_at=some_datetime)</code> (the datetime must be
+        timezone-aware), or relatively, with
+        <code>configure(schedule_in={"hours": 1, "minutes": 30})</code>, whose
+        keys are Python <code>timedelta</code> arguments. Workers simply refuse
+        to fetch a job before its time. The guide is precise about what the
+        timestamp means: "If a job is configured with a date in the future, it
+        will run at the first opportunity after that date." It's a floor, not
+        an appointment; if every worker is busy at the scheduled moment, the
+        job runs when one frees up.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch06_scheduling.py (excerpt)</figcaption>
+        <pre><code class="language-python">job_id = await reminder.configure(schedule_in={"seconds": 2}).defer_async(
+    text="2 seconds later"
+)
+
+# A 6-column cron expression: the extra first-position column is seconds,
+# so this fires once per second — handy for a demo, silly in production.
+@app.periodic(cron="* * * * * *")
+@app.task
+async def tick(timestamp: int) -> None:
+    print(f"  [tick] scheduled for unix time {timestamp}")</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">deferred at 23:54:29, scheduled_at=23:54:31.243327, status=todo
+  [tick] scheduled for unix time 1783295669
+  [tick] scheduled for unix time 1783295670
+  [reminder] 2 seconds later
+  [tick] scheduled for unix time 1783295671
+  [tick] scheduled for unix time 1783295672
+worker stopped
+reminder job is now: succeeded</code></pre>
+      </figure>
+
+      <p>
+        The reminder sat in <code>todo</code> with its due time recorded, the
+        periodic <code>tick</code> fired each second around it, and the
+        reminder ran at its first opportunity past 23:54:31. Both features in
+        one worker, no extra processes.
+      </p>
+
+      <h2>Periodic tasks</h2>
+      <p>
+        Stacking <code>@app.periodic(cron="0 * * * *")</code> on top of
+        <code>@app.task</code> defers a job on that cron schedule: standard
+        five-column syntax, with an
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/cron.html" target="_blank" rel="noopener">optional sixth column for seconds</a>
+        as the demo above used. Every periodic task must accept a
+        <code>timestamp</code> argument: the Unix timestamp of the moment the
+        run was <em>scheduled for</em>, which is not necessarily the moment it
+        runs. That's your anchor for idempotent work, like "build the report
+        for the hour ending at <code>timestamp</code>."
+      </p>
+      <p>
+        The same task can carry several schedules: call
+        <code>app.periodic()</code> as a function with different
+        <code>task_kwargs</code> and a unique <code>periodic_id</code> per
+        schedule, and one task definition becomes "sync region A every 5
+        minutes, region B every 10."
+      </p>
+
+      <aside class="callout underhood">
+        <span class="callout-title">🔬 Under the hood</span>
+        <p>
+          There is no scheduler process to deploy (Celery users: no beat). Each
+          worker runs a "periodic deferrer" that computes upcoming cron ticks
+          and defers the jobs itself. With five workers you have five deferrers
+          racing, and the
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/cron.html" target="_blank" rel="noopener">docs' guarantee</a>
+          is that "the database is responsible for making sure deferring only
+          happens once per period, even with multiple workers." Concretely,
+          the shipped schema puts a unique constraint on
+          (task_name, periodic_id, defer_timestamp) in the
+          procrastinate_periodic_defers table, turning the race into a no-op
+          for the losers. Chapter 4's worker log showed the other side of this:
+          "No periodic task found, periodic deferrer will not run."
+        </p>
+      </aside>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          Periodic scheduling happens <em>inside workers</em>, so if no worker
+          is running, nothing gets deferred. On startup a worker catches up on
+          missed schedules, but only recent ones: per the
+          <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/cron.html" target="_blank" rel="noopener">periodic-tasks guide</a>,
+          "a task that is more than 10 minutes late will not be deferred"
+          (configurable through the App's <code>periodic_defaults</code>). If
+          the whole worker fleet was down at midnight and came back at 00:30,
+          the nightly job doesn't run that night; your deploy and incident
+          processes should account for it.
+        </p>
+      </aside>
+
+      <p>
+        One more interaction to plan for: a periodic task that's slower than
+        its own period accumulates. A cleanup that takes two minutes, scheduled
+        every minute, falls behind forever. The standard fix is chapter 7's
+        queueing lock on the periodic task, so a new job is refused while the
+        previous one still waits.
+      </p>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch06_scheduling</code>, then look
+          at the bookkeeping it left behind:
+          <code>SELECT * FROM procrastinate_periodic_defers ORDER BY id DESC LIMIT 5</code>
+          in <code>psql</code> shows one row per tick, and the unique
+          constraint from the callout above sits right in the table
+          definition. (We also tried stopping for a minute and restarting:
+          the missed per-second ticks were <em>not</em> back-filled — catch-up
+          applies to schedules missed around a restart, not a full replay of
+          downtime.)
+        </p>
+        <p>
+          The challenge, <code>challenges/ch06/challenge.py</code>, covers all
+          three tools: <code>schedule_in</code>, <code>schedule_at</code>, and
+          a once-per-second periodic heartbeat.
+          <code>uv run pytest challenges/ch06</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch05.html"><span class="dir">← Previous</span>Retries and failure</a>
+        <a class="next" href="ch07.html"><span class="dir">Next →</span>Locks, queueing locks, priorities</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

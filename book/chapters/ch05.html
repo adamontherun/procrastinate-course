@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 5 · Retries and failure — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry. Chapter 5 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch05.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 5 · Retries and failure — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry. Chapter 5 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch05.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 5 · Retries and failure — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry. Chapter 5 of Procrastinate: Task Queues on Postgres, Part II · Controlling execution.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 5,
+  "name": "Retries and failure",
+  "description": "The job lifecycle, built-in retry strategies, and writing a custom one that changes queue or priority on retry.",
+  "url": "{{PAGES_URL}}chapters/ch05.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch04.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch06.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html" class="current"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 5 · Part II — Controlling execution</p>
+      <h1>Retries and failure</h1>
+      <p class="lede">
+        The email provider times out. The third-party API returns a 503. The
+        database deadlocks once a week. Background jobs exist partly because
+        this is normal, and a task queue earns its keep by what it does next.
+        In Procrastinate, "what happens next" is a retry strategy: a policy
+        object attached to the task, consulted every time it fails.
+      </p>
+
+      <h2>What a failure actually is</h2>
+      <p>
+        When a task raises, the worker catches the exception, logs it, and asks
+        the task's retry strategy for a decision. No strategy (the default)
+        means the job's row moves to <code>failed</code> and stays there. With a
+        strategy, the job can instead go back to <code>todo</code>, possibly
+        scheduled for later, and chapter 1's state machine gains its loop: a
+        retryable failure is just a transition back to the start. The
+        difference is visible in the events Procrastinate records:
+        <code>deferred_for_retry</code> versus <code>failed</code>, in the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/events.html" target="_blank" rel="noopener">events table</a>.
+      </p>
+
+      <h2>The built-in options</h2>
+      <p>
+        The <code>retry=</code> parameter on the task decorator accepts three
+        shapes, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/retry.html" target="_blank" rel="noopener">retry guide</a>.
+        <code>retry=True</code> retries forever, which is almost never what you
+        want. <code>retry=5</code> retries five times, so six executions in
+        total. And a <code>RetryStrategy</code> object gives you the real
+        controls:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch05_retries.py (excerpt)</figcaption>
+        <pre><code class="language-python"># retry=2 means "2 retries", so up to 3 attempts in total.
+@app.task(retry=2)
+async def flaky_ping() -> None:
+    ping_attempts["count"] += 1
+    if ping_attempts["count"] < 3:
+        raise ConnectionError(f"attempt {ping_attempts['count']} failed")
+    print(f"  [flaky_ping] attempt {ping_attempts['count']} succeeded")
+
+
+# Only ConnectionError is worth retrying; a ValueError fails immediately.
+@app.task(
+    retry=procrastinate.RetryStrategy(
+        max_attempts=3,
+        wait=1,
+        retry_exceptions={ConnectionError},
+    )
+)
+async def selective(kind: str) -> None:
+    raise ValueError(f"bad input: {kind!r}")</code></pre>
+      </figure>
+
+      <p>
+        <code>RetryStrategy</code> takes <code>wait</code> (a constant delay in
+        seconds between attempts), <code>linear_wait</code>, or
+        <code>exponential_wait</code> for growing backoff, and
+        <code>retry_exceptions</code>, a set of exception types that are worth
+        retrying. That last one encodes a distinction worth internalizing: a
+        <code>ConnectionError</code> might succeed next time, but a
+        <code>ValueError</code> from a malformed argument will fail every time
+        you run it, and retrying it five times with exponential backoff just
+        delays the inevitable while hiding the bug.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          Despite its name, <code>max_attempts</code> counts <em>retries</em>,
+          not executions: the
+          <a href="https://github.com/procrastinate-org/procrastinate/blob/main/procrastinate/retry.py" target="_blank" rel="noopener">source</a>
+          documents it as "the maximum number of attempts the job should be
+          retried," and stops when the count of previous attempts reaches it.
+          So <code>max_attempts=3</code> allows four executions. We hit this
+          building this chapter's challenge: a test expecting three executions
+          saw a fourth. If you need "at most N runs," write
+          <code>max_attempts=N-1</code>.
+        </p>
+      </aside>
+
+      <h2>Writing your own strategy</h2>
+      <p>
+        For anything the built-in knobs can't express, subclass
+        <code>BaseRetryStrategy</code> and implement
+        <code>get_retry_decision()</code>. It receives the exception and the
+        job, and returns either <code>None</code> (give up, the job fails) or a
+        <code>RetryDecision</code>, which can set when to retry
+        (<code>retry_in</code>/<code>retry_at</code>) and also move the job: a
+        new <code>priority</code>, <code>queue</code>, or <code>lock</code>.
+        This example escalates the job's priority on retry:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch05_retries.py (excerpt)</figcaption>
+        <pre><code class="language-python">class Escalate(BaseRetryStrategy):
+    """Retry immediately, once, at a higher priority."""
+
+    def get_retry_decision(
+        self, *, exception: BaseException, job: jobs.Job
+    ) -> RetryDecision | None:
+        if job.attempts >= 1:
+            return None  # give up
+        return RetryDecision(retry_in={"seconds": 0}, priority=job.priority + 10)</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output (worker error logs trimmed)</figcaption>
+        <pre><code class="language-text">  [flaky_ping] attempt 3 succeeded
+flaky_ping : status=succeeded attempts=3 priority=0
+selective  : status=failed attempts=1 priority=0
+escalating : status=failed attempts=2 priority=10</code></pre>
+      </figure>
+
+      <p>
+        Three fates, all recorded in the job rows. <code>flaky_ping</code>
+        failed twice and succeeded on its third attempt, all within a single
+        <code>wait=False</code> worker run, since an immediate retry goes
+        straight back to <code>todo</code>. <code>selective</code> raised the
+        wrong kind of exception and failed on attempt one. And the custom
+        strategy's fingerprints are on the last row: two attempts, final
+        priority 10.
+      </p>
+
+      <p>
+        One escape hatch to know about before chapter 12 uses it: a job that
+        has already failed isn't gone. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/retry.html" target="_blank" rel="noopener">same guide</a>
+        shows <code>app.job_manager.retry_job_by_id_async()</code> for
+        programmatic resurrection, and chapter 2's admin shell has a
+        <code>retry</code> command for doing it by hand.
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          Retries with backoff interact with everything around them: a job
+          retried in an hour holds any lock context it was configured with
+          (chapter 7's caveats apply), and a worker deploy that changes task
+          code means a retried job runs the <em>new</em> code with the
+          <em>old</em> arguments. Keeping task arguments small and stable
+          (ids, not payloads) is what makes that safe.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch05_retries</code>, then run it a
+          second time and look closely at <code>flaky_ping</code>: the attempt
+          counter is module state, so the second run's job succeeds on its
+          first try. State that lives in the worker process is not state that
+          lives in the queue.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch05/challenge.py</code>, has you
+          build a policy that retries <code>ConnectionError</code> but not
+          <code>ValueError</code>, with exactly three total executions. The
+          off-by-one from the gotcha above is lying in wait.
+          <code>uv run pytest challenges/ch05</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch04.html"><span class="dir">← Previous</span>Workers up close</a>
+        <a class="next" href="ch06.html"><span class="dir">Next →</span>Scheduling: later and every hour</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>
