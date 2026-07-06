@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 13 · Deploying workers on AWS ECS — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys. Chapter 13 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch13.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 13 · Deploying workers on AWS ECS — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys. Chapter 13 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch13.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 13 · Deploying workers on AWS ECS — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys. Chapter 13 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 13,
+  "name": "Deploying workers on AWS ECS",
+  "description": "Containerize the worker, map SIGTERM to procrastinate's graceful shutdown, and size stopTimeout so jobs survive deploys.",
+  "url": "{{PAGES_URL}}chapters/ch13.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch12.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html" class="current"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 13 · Part IV — Production</p>
+      <h1>Deploying workers on AWS ECS</h1>
+      <p class="lede">
+        The architecture is the one chapter 9 drew: web containers defer,
+        worker containers execute, and the only shared infrastructure is
+        Postgres — which on AWS means the RDS instance you likely already
+        run. This chapter builds the worker image, proves its shutdown
+        behavior locally with real signals, and walks through the ECS task
+        definition line by line. The through-line is one deadline
+        negotiation: ECS gives a stopping container a fixed grace period,
+        and procrastinate has to finish or hand off its jobs inside it.
+      </p>
+
+      <h2>The image</h2>
+      <p>
+        The worker needs remarkably little: procrastinate, a driver, and your
+        tasks module. Connection settings ride on the standard libpq
+        environment variables from chapter 2, so the same image runs against
+        local Postgres and RDS without modification.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">deploy/Dockerfile</figcaption>
+        <pre><code class="language-dockerfile">FROM python:3.12-slim
+
+# psycopg[binary] matters: procrastinate's base dependency is pure-python
+# psycopg, which needs a system libpq that slim images don't have. The
+# binary wheel bundles it. (Without this, the worker dies on startup with
+# "ImportError: no pq wrapper available".)
+RUN pip install --no-cache-dir "procrastinate==3.9.0" "psycopg[binary]>=3.2"
+
+WORKDIR /app
+COPY worker_app.py .
+
+ENV PROCRASTINATE_APP=worker_app.app \
+    PYTHONPATH=/app
+
+# SIGTERM (what `docker stop` and ECS send) triggers procrastinate's
+# graceful shutdown: finish running jobs, then exit. The exec-form CMD
+# matters — a shell-form CMD would make PID 1 a shell that swallows
+# SIGTERM instead of the worker.
+CMD ["procrastinate", "worker", "--concurrency=10", "--shutdown-graceful-timeout=90"]</code></pre>
+      </figure>
+
+      <p>
+        Both comments in that file are scars, not decoration. Our first build
+        used plain <code>procrastinate</code> and the container died on
+        startup with exactly that ImportError, because
+        <code>python:3.12-slim</code> ships no libpq and procrastinate's own
+        dependency is the pure-Python psycopg. And the exec-form
+        <code>CMD</code> is what makes the whole shutdown story below work at
+        all: signals go to PID 1, and PID 1 must be the worker.
+      </p>
+
+      <h2>Prove the shutdown locally</h2>
+      <p>
+        <code>docker stop</code> sends SIGTERM, waits, then SIGKILLs (the
+        same sequence ECS uses), so the deployment's most delicate behavior
+        can be verified on a laptop. We started the container against the
+        course database, deferred a five-second job, and stopped the
+        container two seconds in:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">terminal + container log</figcaption>
+        <pre><code class="language-text">$ docker stop -t 60 ch13-worker        # SIGTERM lands 2s into a 5s job
+ch13-worker                            # returned after 3.19s, not 60
+
+INFO:procrastinate.worker.worker:Starting job ch13.resize_image[22](key='cat.jpg')
+INFO:procrastinate.worker.worker:Stop requested
+INFO:procrastinate.worker.worker:Waiting for job to finish: worker: ch13.resize_image[22](key='cat.jpg') (started 2.081 s ago)
+resized cat.jpg
+INFO:procrastinate.worker:Job ch13.resize_image[22](key='cat.jpg') ended with status: Success, lasted 5.005 s
+INFO:procrastinate.worker.worker:Stopped worker on all queues</code></pre>
+      </figure>
+
+      <p>
+        That's chapter 12's graceful shutdown wearing its production
+        clothes: SIGTERM arrives, the worker stops fetching, announces what
+        it's waiting for, finishes the job, and exits on its own — well
+        before the deadline. The job's status in the database afterward:
+        <code>succeeded</code>.
+      </p>
+
+      <h2>The task definition</h2>
+      <p>
+        <code>deploy/ecs-task-definition.json</code> is the full Fargate
+        task definition; these are the lines that carry weight. The numbers
+        come from the
+        <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html" target="_blank" rel="noopener">ECS task definition parameters reference</a>:
+        <code>stopTimeout</code> is the "time duration (in seconds) to wait
+        before the container is forcefully killed if it doesn't exit
+        normally on its own" — 30 seconds when unset, 120 at most on
+        Fargate.
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">deploy/ecs-task-definition.json (the parts that matter)</figcaption>
+        <pre><code class="language-json">{
+  "family": "procrastinate-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "containerDefinitions": [{
+    "name": "worker",
+    "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/procrastinate-worker:latest",
+    "essential": true,
+    "stopTimeout": 120,
+    "environment": [
+      { "name": "PGHOST", "value": "app-db.cluster-abc123.us-east-1.rds.amazonaws.com" },
+      { "name": "PGUSER", "value": "worker" }
+    ],
+    "secrets": [
+      { "name": "PGPASSWORD",
+        "valueFrom": "arn:aws:secretsmanager:...:secret:prod/db/worker-password" }
+    ],
+    "healthCheck": {
+      "command": ["CMD-SHELL", "procrastinate healthchecks || exit 1"]
+    },
+    "logConfiguration": { "logDriver": "awslogs", "options": { "...": "..." } }
+  }]
+}</code></pre>
+      </figure>
+
+      <p>
+        The deadline negotiation lives in two numbers that must be read
+        together. During a deploy or scale-in, ECS sends SIGTERM and waits
+        <code>stopTimeout</code> seconds (120, the Fargate maximum) before
+        SIGKILL. Inside that window, the worker waits up to its own
+        <code>--shutdown-graceful-timeout</code> (90) for jobs to finish
+        before it starts aborting them (chapter 8's machinery, with
+        <code>AbortReason.SHUTDOWN</code>), and then needs a few seconds to
+        record the aborts. The 30-second gap between 90 and 120 is that
+        recording headroom. Get the inequality backwards and SIGKILL lands
+        mid-abort: jobs freeze in <code>doing</code>, exactly the stalled
+        state chapter 12 recovers from. That recovery recipe isn't optional
+        garnish here; it's the backstop this whole design assumes.
+      </p>
+
+      <p>
+        The rest of the file, briefly. <code>PGPASSWORD</code> arrives
+        through <code>secrets</code> (Secrets Manager), never plain
+        <code>environment</code>. <code>essential: true</code> means a dead
+        worker kills the task so the service replaces it.
+        The health check reuses chapter 2's
+        <code>procrastinate healthchecks</code> inside the container. And
+        <code>awslogs</code> ships the worker's log (the same lines you've
+        read all course) to CloudWatch. Run it all as an ECS
+        <em>service</em> with a desired count, one service per queue group
+        if chapter 4's routing matters to you; scaling is changing the
+        count, since chapter 6 established that any worker can also carry
+        the periodic scheduling.
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          What this chapter verified is what a laptop can verify: the image
+          builds, the worker runs against a real Postgres, and SIGTERM
+          produces a clean handoff. The account-side steps (pushing to ECR,
+          <code>aws ecs register-task-definition</code>, service creation,
+          RDS networking and security groups) follow the same JSON you've
+          just read, but only your AWS account can prove them. Treat the
+          first deploy's kill-a-worker-mid-job test (chapter 12) as part of
+          going live, not as optional.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Rebuild and rerun the shutdown experiment:
+          <code>docker build -t procrastinate-course-worker deploy/</code>,
+          run it with the PG* variables pointing at the course database
+          (<code>PGHOST=host.docker.internal PGPORT=5441 ...</code>), defer
+          <code>ch13.resize_image</code> by name, and <code>docker stop</code>
+          it mid-job. Then try <code>docker kill</code> instead and watch
+          chapter 12's stalled-job machinery earn its keep.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch13/challenge.py</code>, is a
+          task-definition reviewer: six checks an SRE would make before
+          approving this deploy, run against the repo's real JSON. No AWS
+          account needed. <code>uv run pytest challenges/ch13</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch12.html"><span class="dir">← Previous</span>Operating in production</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>

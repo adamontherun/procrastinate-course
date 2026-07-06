@@ -1,0 +1,44 @@
+{
+  "family": "procrastinate-worker",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::123456789012:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "worker",
+      "image": "123456789012.dkr.ecr.us-east-1.amazonaws.com/procrastinate-worker:latest",
+      "essential": true,
+      "stopTimeout": 120,
+      "environment": [
+        { "name": "PGHOST", "value": "app-db.cluster-abc123.us-east-1.rds.amazonaws.com" },
+        { "name": "PGPORT", "value": "5432" },
+        { "name": "PGDATABASE", "value": "app" },
+        { "name": "PGUSER", "value": "worker" },
+        { "name": "PROCRASTINATE_APP", "value": "worker_app.app" }
+      ],
+      "secrets": [
+        {
+          "name": "PGPASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:123456789012:secret:prod/db/worker-password"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/procrastinate-worker",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "worker"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "procrastinate healthchecks || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 15
+      }
+    }
+  ]
+}

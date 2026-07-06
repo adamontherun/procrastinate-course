@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ch 12 · Operating in production — Procrastinate: Task Queues on Postgres</title>
+<meta name="description" content="Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small. Chapter 12 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta name="keywords" content="procrastinate, python task queue, postgresql task queue, background jobs, celery alternative, distributed task processing, LISTEN NOTIFY, fastapi background tasks, aws ecs workers">
+<meta name="author" content="Adam Smith">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{PAGES_URL}}chapters/ch12.html">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Procrastinate: Task Queues on Postgres">
+<meta property="og:title" content="Ch 12 · Operating in production — Procrastinate: Task Queues on Postgres">
+<meta property="og:description" content="Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small. Chapter 12 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta property="og:url" content="{{PAGES_URL}}chapters/ch12.html">
+<meta property="og:image" content="{{OG_IMAGE_URL}}">
+<meta property="og:image:width" content="{{OG_IMAGE_WIDTH}}">
+<meta property="og:image:height" content="{{OG_IMAGE_HEIGHT}}">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Ch 12 · Operating in production — Procrastinate: Task Queues on Postgres">
+<meta name="twitter:description" content="Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small. Chapter 12 of Procrastinate: Task Queues on Postgres, Part IV · Production.">
+<meta name="twitter:image" content="{{OG_IMAGE_URL}}">
+<meta name="theme-color" content="#b45309">
+<script>document.documentElement.dataset.theme=localStorage.getItem("book-theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+<link rel="stylesheet" href="../assets/style.css">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Chapter",
+  "position": 12,
+  "name": "Operating in production",
+  "description": "Schema migrations without downtime, monitoring, graceful shutdown, stalled-job recovery, and keeping the jobs table small.",
+  "url": "{{PAGES_URL}}chapters/ch12.html",
+  "image": "{{OG_IMAGE_URL}}",
+  "inLanguage": "en",
+  "isPartOf": {"@type": "Course", "name": "Procrastinate: Task Queues on Postgres", "url": "{{PAGES_URL}}"},
+  "previousItem": "{{PAGES_URL}}chapters/ch11.html",
+  "nextItem": "{{PAGES_URL}}chapters/ch13.html"
+}
+</script>
+</head>
+<body>
+<div class="book">
+
+  <aside class="sidebar">
+    <a class="brand" href="../index.html">Procrastinate <span class="accent">on Postgres</span></a>
+    <p class="tagline">A hands-on course on Python's Postgres-native task queue</p>
+
+    <div class="sidebar-links">
+      <a class="codespace-link" href="{{CODESPACES_URL}}" target="_blank" rel="noopener">&#9654; Launch Codespace</a>
+      <a class="repo-link" href="{{REPO_URL}}" target="_blank" rel="noopener">GitHub repo &#8599;</a>
+    </div>
+
+    <nav aria-label="Chapters">
+      <p class="part-label">Part I · Foundations</p>
+      <ol>
+        <li><a href="ch01.html"><span class="ch-num">1</span>Why a task queue — and why Postgres</a></li>
+        <li><a href="ch02.html"><span class="ch-num">2</span>Setup: your first job, end to end</a></li>
+        <li><a href="ch03.html"><span class="ch-num">3</span>Defining and deferring tasks</a></li>
+        <li><a href="ch04.html"><span class="ch-num">4</span>Workers up close</a></li>
+      </ol>
+      <p class="part-label">Part II · Controlling execution</p>
+      <ol>
+        <li><a href="ch05.html"><span class="ch-num">5</span>Retries and failure</a></li>
+        <li><a href="ch06.html"><span class="ch-num">6</span>Scheduling: later and every hour</a></li>
+        <li><a href="ch07.html"><span class="ch-num">7</span>Locks, queueing locks, priorities</a></li>
+        <li><a href="ch08.html"><span class="ch-num">8</span>Context, cancellation, middleware</a></li>
+      </ol>
+      <p class="part-label">Part III · Sync and the web</p>
+      <ol>
+        <li><a href="ch09.html"><span class="ch-num">9</span>Sync and async together</a></li>
+        <li><a href="ch10.html"><span class="ch-num">10</span>Procrastinate in FastAPI</a></li>
+      </ol>
+      <p class="part-label">Part IV · Production</p>
+      <ol>
+        <li><a href="ch11.html"><span class="ch-num">11</span>Testing your tasks</a></li>
+        <li><a href="ch12.html" class="current"><span class="ch-num">12</span>Operating in production</a></li>
+        <li><a href="ch13.html"><span class="ch-num">13</span>Deploying workers on AWS ECS</a></li>
+      </ol>
+    </nav>
+    <button class="theme-toggle" type="button">☾ Dark mode</button>
+  </aside>
+
+  <button class="menu-btn" type="button" aria-label="Toggle chapter list">☰ Chapters</button>
+
+  <main>
+    <article>
+      <p class="kicker">Chapter 12 · Part IV — Production</p>
+      <h1>Operating in production</h1>
+      <p class="lede">
+        A queue that runs for months accumulates history, survives worker
+        crashes, and outlives several versions of the library that created
+        it. This chapter is about that timescale: keeping the jobs table
+        small, noticing when things break, recovering the jobs a dead worker
+        took with it, and upgrading the schema without stopping the world.
+        Its centerpiece is a demo where we SIGKILL a worker mid-job on
+        purpose and watch the recovery machinery work.
+      </p>
+
+      <h2>Keep the table small</h2>
+      <p>
+        Finished jobs stay in <code>procrastinate_jobs</code> forever by
+        default; you saw chapter 1's rows again in chapter 2's shell. There
+        are two cleanup levers, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/delete_finished_jobs.html" target="_blank" rel="noopener">cleanup guide</a>.
+        The blunt one is the worker option
+        <code>delete_jobs="always"</code> (or <code>"successful"</code>),
+        which removes each job the moment it completes:
+      </p>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output (examples/ch12_ops.py, part A)</figcaption>
+        <pre><code class="language-text">after delete_jobs='always': 0 rows left</code></pre>
+      </figure>
+
+      <p>
+        The finer-grained lever keeps recent history for debugging and
+        removes only old rows: the builtin task
+        <code>remove_old_jobs</code>, deferred periodically with a
+        <code>max_hours</code> argument. The docs' recommended shape combines
+        chapter 6 and chapter 7: a periodic schedule plus the
+        <code>remove_old_jobs</code> queueing lock so sweeps never stack up.
+        Underneath, the builtin calls a public API you can also use directly,
+        <code>app.job_manager.delete_old_jobs(nb_hours=...)</code>, which is
+        what this chapter's challenge exercises.
+      </p>
+
+      <aside class="callout gotcha">
+        <span class="callout-title">⚠ Gotcha</span>
+        <p>
+          We hit a sharp edge here while writing this course's test suite —
+          a long-known upstream bug
+          (<a href="https://github.com/procrastinate-org/procrastinate/issues/521">procrastinate #521</a>,
+          open since 2022, still present in 3.9.0):
+          <code>add_tasks_from</code> renames a blueprint's task objects in
+          place, so every <code>App()</code> constructed in a process
+          re-registers the builtin tasks and, in doing so, mutates the shared
+          task object's name: the first app knows the task as
+          <code>builtin:procrastinate.builtin_tasks.remove_old_jobs</code>,
+          the second as <code>builtin:builtin:…</code>, and so on. Defer the
+          builtin in a multi-app process (a test suite, most likely) and the
+          job can be stamped with a name no fresh worker recognizes — or,
+          eventually, one that overflows the 128-character name column.
+          Real deployments construct one app per process and never notice.
+          If your code might not, defer it by its stable dotted-string alias
+          (<code>app.configure_task(name="procrastinate.builtin_tasks.remove_old_jobs", ...)</code>)
+          or call <code>delete_old_jobs</code> directly.
+        </p>
+      </aside>
+
+      <h2>Recover what dead workers took</h2>
+      <p>
+        Chapter 4's log showed workers registering themselves and
+        heartbeating every 10 seconds. Here's what that buys. A worker that
+        dies without a graceful shutdown (OOM-killed, SIGKILL, hardware)
+        leaves its in-flight jobs stuck in <code>doing</code>, and chapter 7
+        told you the extra cost: any locks those jobs hold stay blocked. The
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/retry_stalled_jobs.html" target="_blank" rel="noopener">stalled-jobs guide</a>
+        defines the detection rule (a job is stalled when its worker hasn't
+        heartbeated for <code>stalled_worker_timeout</code>, 30 seconds by
+        default) and the fix: find them, retry them. We manufactured the
+        disaster deliberately:
+      </p>
+
+      <figure class="codeblock">
+        <figcaption class="code-label">examples/ch12_ops.py (part B, core)</figcaption>
+        <pre><code class="language-python">job_id = await app.configure_task(name="ch12.long_job", queue="ch12").defer_async()
+
+worker = subprocess.Popen([sys.executable, "-m", "examples.ch12_worker_process"], ...)
+await asyncio.sleep(3)  # it registers, heartbeats, grabs the job
+
+os.kill(worker.pid, signal.SIGKILL)  # no graceful anything
+await asyncio.sleep(4)
+
+stalled = list(await app.job_manager.get_stalled_jobs(seconds_since_heartbeat=3))
+for job in stalled:
+    await app.job_manager.retry_job(job)</code></pre>
+      </figure>
+
+      <figure class="codeblock sql-echo">
+        <figcaption class="code-label">output</figcaption>
+        <pre><code class="language-text">worker (pid 85501) picked the job up: status=doing
+worker SIGKILLed mid-job
+stalled jobs detected: [7]
+after retry_job: status=todo</code></pre>
+      </figure>
+
+      <p>
+        The job went back to <code>todo</code>, and any healthy worker will
+        take it from there. In production you don't run this by hand: the
+        stalled-jobs guide's recipe is a periodic task (every 10 minutes,
+        with a queueing lock) doing exactly the loop above, so the fleet
+        heals itself. One caution belongs next to it: "stalled" is an
+        inference from silence. A worker that's alive but wedged past its
+        heartbeat looks identical, and retrying its job means the work may
+        run twice. Once you adopt this recipe, delivery is effectively
+        at-least-once, so tasks you let it resurrect should be idempotent.
+      </p>
+
+      <h2>Watching it run</h2>
+      <p>
+        You met the two CLI tools in chapter 2: <code>healthchecks</code> for
+        a smoke test (configuration, connection, schema) and
+        <code>shell</code> for inspecting and fixing jobs (<code>list_jobs</code>,
+        <code>retry</code>, <code>cancel</code> — it also runs one-shot:
+        <code>procrastinate shell list_jobs</code>). For dashboards and
+        alerting, the queue is a table: <code>SELECT status, COUNT(*) FROM
+        procrastinate_jobs GROUP BY status</code> is a metrics exporter away
+        from a graph, and the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/advanced/events.html" target="_blank" rel="noopener">events table</a>
+        adds per-transition timestamps (deferred, started, retried, failed),
+        though the docs label that API early-stage. For errors, procrastinate
+        logs every failure with the exception attached, under the logger name
+        <code>procrastinate</code>, each record carrying an <code>action</code>
+        attribute naming the event, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/logging.html" target="_blank" rel="noopener">logging guide</a>.
+        That's exactly what Sentry-style tools ingest via their logging
+        integrations.
+      </p>
+
+      <h2>Migrating the schema</h2>
+      <p>
+        The schema you applied in chapter 2 belongs to procrastinate 3.9.0;
+        upgrading the library eventually means migrating it. Migrations ship
+        inside the package as plain SQL files
+        (<code>procrastinate schema --migrations-path</code> prints where),
+        named for the version they belong to and marked <code>pre</code> or
+        <code>post</code>, per the
+        <a href="https://procrastinate.readthedocs.io/en/stable/howto/production/migrations.html" target="_blank" rel="noopener">migrations guide</a>.
+        The simple workflow stops everything: apply all migrations, upgrade
+        the library, restart. The zero-downtime workflow interleaves per
+        version: apply that version's <code>pre</code> scripts, deploy the
+        new code, apply its <code>post</code> scripts, repeat. Procrastinate
+        doesn't track which migrations have run; your migration tooling
+        (or a checklist) does.
+      </p>
+
+      <aside class="callout production">
+        <span class="callout-title">🏭 In production</span>
+        <p>
+          The pre/post split exists because during a deploy, old and new
+          library versions run against one schema at the same time.
+          <code>pre</code> scripts must be compatible with the old code,
+          <code>post</code> scripts only run once the old code is gone.
+          Skipping a version in a hurry ("we'll jump from 3.6 to 3.9") means
+          applying every intermediate version's scripts in order, not just
+          the newest: the guide is explicit that the zero-downtime path
+          repeats per version.
+        </p>
+      </aside>
+
+      <div class="tryit">
+        <h3>⚡ Try it</h3>
+        <p class="tryit-env">
+          No local setup? <a href="{{CODESPACES_URL}}" target="_blank" rel="noopener">Open this chapter in GitHub Codespaces</a> — {{WHAT_S_ALREADY_RUNNING}}.
+        </p>
+        <p>
+          Run <code>uv run python -m examples.ch12_ops</code> and watch the
+          SIGKILL recovery happen. Then run
+          <code>PYTHONPATH=. uv run procrastinate --app=examples.hello_world.app schema --migrations-path</code>
+          and look inside the directory it prints: the pre/post naming
+          convention is right there in the filenames.
+        </p>
+        <p>
+          The challenge, <code>challenges/ch12/challenge.py</code>:
+          implement <code>recover_stalled()</code> and
+          <code>sweep_old_jobs()</code>. The test manufactures a dead worker
+          in SQL, so you get to fix a disaster you can inspect.
+          <code>uv run pytest challenges/ch12</code>.
+        </p>
+      </div>
+
+      <nav class="chapter-nav">
+        <a href="ch11.html"><span class="dir">← Previous</span>Testing your tasks</a>
+        <a class="next" href="ch13.html"><span class="dir">Next →</span>Deploying workers on AWS ECS</a>
+      </nav>
+    </article>
+  </main>
+</div>
+<script src="../assets/vendor/highlight.min.js"></script>
+<script src="../assets/book.js"></script>
+</body>
+</html>
