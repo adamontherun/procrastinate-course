@@ -5,7 +5,7 @@ the Python task queue that uses PostgreSQL as its broker — no Redis, no Rabbit
 Thirteen chapters, every example run against a real Postgres database, every
 challenge backed by real failing tests.
 
-[![Read the Book](https://img.shields.io/badge/📖_Read_the_Book-adamontherun.github.io/procrastinate-course-b45309)](https://adamontherun.github.io/procrastinate-course/)
+[![Read the Book](https://img.shields.io/badge/📖_Read_the_Book-adamontherun.github.io%2Fprocrastinate--course-b45309)](https://adamontherun.github.io/procrastinate-course/)
 
 [![Course cover: sidebar table of contents, hero copy, and part-by-part chapter list](book/assets/screenshots/homepage.png)](https://adamontherun.github.io/procrastinate-course/)
 
